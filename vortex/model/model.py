@@ -314,10 +314,16 @@ class HyenaCascade(nn.Module):
             x1, x2 = x2, x1
 
         if self.fir_inner_filter_length is not None:
+            if self.hyena_filter_groups > 1:
+                h = self.h.repeat_interleave(self.hidden_size // self.hyena_filter_groups, 0)
+            else:
+                h = self.h
+
+            
             y, fir_inner_state = self.engine.step_fir(
                 x1 * v,
                 inference_params.fir_inner_state_dict[self.layer_idx],
-                weight=self.h,
+                weight=h,
                 bias=self.D,
                 flip_filter=self.fir_inner_filter_length >= 128,
                 gated_bias=self.fir_inner_filter_length >= 128,
@@ -360,7 +366,6 @@ class HyenaCascade(nn.Module):
             self.residues.to(filter_dtype),
             self.log_poles.to(filter_dtype),
         )
-        # h = torch.einsum('do,dot->dt', residues, (log_poles * self.t).exp())
         h = (residues[...,None] * (log_poles * self.t).exp()).sum(1)[None] # B, D, L
         return h, filter_dtype, log_poles, residues
 

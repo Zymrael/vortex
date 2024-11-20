@@ -25,7 +25,7 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", default=1, type=float)
     parser.add_argument("--repetition_penalty", default=1, type=float)
     parser.add_argument("--penalty_alpha", default=0, type=float)
-    parser.add_argument("--top_k", default=4, type=int)
+    parser.add_argument("--top_k", default=8, type=int)
     parser.add_argument("--top_p", default=1, type=float)
     parser.add_argument(
         "--cached_generation",
@@ -33,8 +33,9 @@ if __name__ == "__main__":
         help="Use caching to speed up generation.",
     )
     parser.add_argument("--dry_run", action="store_true", help="Dry run the generation.")
+    parser.add_argument("--debug", action="store_true", help="Debug mode.")
 
-    torch.set_printoptions(precision=2, threshold=5)
+    torch.set_printoptions(precision=4, threshold=5)
 
     torch.manual_seed(1)
     torch.cuda.manual_seed(1)
@@ -49,7 +50,7 @@ if __name__ == "__main__":
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     with torch.device(device):
-        m = StripedHyena(config)
+        m = StripedHyena(config).to(torch.float32)
 
     if not args.dry_run:
         if args.checkpoint_path:
@@ -73,6 +74,6 @@ if __name__ == "__main__":
             input_string=input_string,
             device=device,
             verbose=True,
-            print_generation=True,
+            print_generation=args.debug,
             max_seqlen=8192,
         )

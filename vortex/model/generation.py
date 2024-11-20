@@ -125,8 +125,8 @@ class Generator:
                 )
 
             last_logits = logits[:, -1]
-            
-            print(last_logits.shape, last_logits.min(), last_logits.max(), last_logits)
+            if print_generation and verbose and batch_size == 1:
+                print(last_logits.shape, last_logits.min(), last_logits.max(), last_logits)
 
             new_idx = sample(
                 last_logits,

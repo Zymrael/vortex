@@ -231,7 +231,8 @@ class HyenaInferenceEngine:
             z = z * padding_mask[:, None]
 
         if gate:
-            
+            #if self.layer_idx == 1:
+            #    breakpoint()
             z = x2 * z
 
             if self.print_activations:
@@ -351,7 +352,8 @@ class HyenaInferenceEngine:
                     groups=x1v.shape[1],
                     padding=h.shape[-1] - 1,
                 )[..., :L]
-
+        #if self.layer_idx == 2:
+        #    breakpoint()
         y = y.to(dtype=x1v.dtype)
         y = (y + x1v * D.unsqueeze(-1)) * x2
 
@@ -422,13 +424,15 @@ class HyenaInferenceEngine:
         if flip_filter:
             h = h.flip(-1)
         
+        #if self.layer_idx == 1:
+        #    breakpoint()
         y = h0 * u + torch.sum(fir_state * h, dim=-1)  
 
         if bias is not None:
             if gated_bias:
-                y += bias * u
+                y = y + bias * u
             else:
-                y += bias
+                y = y + bias
 
         # Update the state
         fir_state = torch.roll(fir_state, -1, dims=2)
@@ -437,22 +441,17 @@ class HyenaInferenceEngine:
 
     def step_iir(self, x2, x1, v, D, residues, poles, iir_state, iir_groups=1):
         x1v = x1 * v
-
-        #residues, poles = (
-        #    torch.view_as_complex(residues.to(torch.float32)),
-        #    torch.view_as_complex(poles.to(torch.float32)),
-        #)
-        poles = torch.exp(poles) # poles contains log_poles
-
-        # squeeze the dummy seqlen dimension
-        # D, state_dim, 1 -> 1, D, state_dim
-        residues, poles = residues[..., 0][None], poles[..., 0][None]
+        poles = torch.exp(poles) # poles arg contains log_poles
+        poles = poles[..., 0][None] # squeeze dummy seqlen dim and add dummy batch dim
+        residues = residues[None] # add dummy batch dim
         iir_state = poles * iir_state + x1v[..., None]
 
         res_state = torch.sum(residues * iir_state, dim=-1)
 
         if iir_groups > 1:
             raise NotImplementedError
+        #if self.layer_idx == 2:
+        #    breakpoint()
         y = x2 * (res_state + D * x1v)
 
         return y, iir_state
@@ -492,7 +491,7 @@ class HyenaInferenceEngine:
             state[..., 1] = poles[..., 0] * state[..., 1] + poles[..., 1] * state[..., 0] + x1v_[:, :, i, :, 1]
             output[:, :, i] = torch.sum(residues * state, dim=-2)[..., 0]  # .real
 
-        inference_params.state_dict[self.layer_idx] = torch.view_as_complex(state.to(dtype=torch.float32))
+        inference_params.state_dict[self.layer_idx] = state.to(dtype=torch.float32)
 
         return output
 
@@ -527,7 +526,7 @@ class HyenaInferenceEngine:
         X_s=None,
         use_flashfft=False,
         fftconv_fn=None,
-        state_dtype=torch.complex64,
+        state_dtype=torch.float32,
         *args,
         **kwargs,
     ):
