@@ -61,7 +61,7 @@ def generate_and_score(sequences, generator, tokenizer, args, generations_per_pr
             # for tokenized_prompt in tokenized_prompts:
             generated_seq = generator.generate(
                 num_tokens=args.num_tokens,
-                cached_generation=True,
+                cached_generation=args.cached_generation,
                 input_string=prompt,
                 device=device,
                 verbose=True,
@@ -115,9 +115,14 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_path", default=None, help="Path to checkpoint file")
     parser.add_argument("--num_tokens", default=100, help="Number of tokens to generate.")
     parser.add_argument("--temperature", default=1.0, type=float)
-    parser.add_argument("--top_k", default=2, type=int)
+    parser.add_argument("--top_k", default=4, type=int)
     parser.add_argument("--top_p", default=1.0, type=float)
     parser.add_argument("--generations_per_prompt", default=1, type=int)
+    parser.add_argument(
+        "--cached_generation",
+        action="store_true",
+        help="Use caching to speed up generation.",
+    )
 
     torch.manual_seed(1)
     torch.cuda.manual_seed(1)
@@ -136,18 +141,17 @@ if __name__ == "__main__":
         m = StripedHyena(config).to(torch.float32)
 
     if args.checkpoint_path:
-        state_dict = torch.load(args.checkpoint_path, map_location=device)
-        m.custom_load_state_dict(state_dict, strict=False)
+        m.custom_load_state_dict(torch.load(args.checkpoint_path, map_location=device), strict=False)
 
     m = m.to(device)
     m.to_bfloat16_except_pr_lc()
 
     g = Generator(m, tokenizer, top_k=args.top_k, top_p=args.top_p, temperature=args.temperature)
 
-    sequences = read_prompts('./test/generation/data/prompts.csv')
+    sequences = read_prompts('./test/data/prompts.csv')
 
     scores = generate_and_score(sequences, g, tokenizer, args, generations_per_prompt=args.generations_per_prompt)
     
     print(scores)
-    print("Mean DNA sequence alignment score")
+    print("\% Matching Nucleotides")
     print(np.mean(scores))
