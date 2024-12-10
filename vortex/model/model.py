@@ -414,6 +414,17 @@ class ParallelGatedConvBlock(nn.Module):
                 self.res_mlp_norm, fullgraph=True, dynamic=False, mode="reduce-overhead"
             )
 
+    def pad_to_multiple(self, x, multiple=16):
+        """Pad input tensor to multiple of 16 only when FP8 is enabled"""
+        if not self.config.get("use_fp8_input_projections", False):
+            return x
+        
+        batch_size, seq_len, hidden_dim = x.size()
+        pad_len = (multiple - (seq_len % multiple)) % multiple
+        if pad_len == 0:
+            return x
+        return F.pad(x, (0, 0, 0, pad_len))
+        
     def proj_norm(self, x):
         if self.print_activations:
             activations_logger.info(f"pre mixer norm: {x} {x.min()} {x.max()} {self.projections.__class__}")
@@ -429,10 +440,19 @@ class ParallelGatedConvBlock(nn.Module):
                 activations_logger.info(f"post mixer norm activation_diff: {activation_diff.max()}, {activation_diff.mean()}")
                 activations_logger.info(f"pre norm scale: {self.pre_norm.scale}, {self.pre_norm.scale.min()}, {self.pre_norm.scale.max()}")
 
-        y = self.projections(self.pre_norm(x))
-        if isinstance(y, tuple):
-            y = y[0]
-        return y
+        original_seq_len = x.size(1)
+        normalized = self.pre_norm(x)
+        normalized = self.pad_to_multiple(normalized)
+        projected = self.projections(normalized)
+
+        original_seq_len = x.size(1)
+        # Slice back to original sequence length if padding was added
+        if isinstance(projected, tuple):
+            projected = projected[0]
+        if projected.size(1) > original_seq_len:
+            projected = projected[:, :original_seq_len, :]
+        
+        return projected
 
     def res_mlp_norm(self, x):
         if self.print_activations:
