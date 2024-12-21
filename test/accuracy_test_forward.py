@@ -38,8 +38,9 @@ def test_dna_model(model, device='cuda:0'):
         tokenizer.tokenize(seq),
         dtype=torch.int,
     ).to(device).unsqueeze(0)
-    
-    output1, _ = model.forward(input_ids)
+    breakpoint()
+    with torch.no_grad():
+        output1, _ = model.forward(input_ids)
     logprobs = torch.log_softmax(output1[:, :-1, :], dim=-1)
     chars = torch.argmax(logprobs, dim=-1)
 
@@ -103,9 +104,8 @@ if __name__ == "__main__":
     with torch.device(device):
         m = StripedHyena(config).to(torch.float32)
 
-    if args.checkpoint_path:
-        state_dict = torch.load(args.checkpoint_path, map_location=device)
-        m.custom_load_state_dict(state_dict, strict=False)
+    with torch.inference_mode():
+        m.custom_load_state_dict(torch.load(args.checkpoint_path, map_location=device), strict=False)
 
     m = m.to(device)
     m.to_bfloat16_except_pr_lc()

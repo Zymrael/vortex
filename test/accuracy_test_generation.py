@@ -113,7 +113,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run StripedHyena Model")
     parser.add_argument("--config_path", required=True, help="Path to configuration file")
     parser.add_argument("--checkpoint_path", default=None, help="Path to checkpoint file")
-    parser.add_argument("--num_tokens", default=100, help="Number of tokens to generate.")
+    parser.add_argument("--num_tokens", default=500, help="Number of tokens to generate.")
     parser.add_argument("--temperature", default=1.0, type=float)
     parser.add_argument("--top_k", default=4, type=int)
     parser.add_argument("--top_p", default=1.0, type=float)
