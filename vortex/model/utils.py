@@ -1,5 +1,4 @@
 import torch
-from einops import rearrange
 
 
 def grab_first_if_tuple(x):
@@ -10,16 +9,16 @@ def grab_first_if_tuple(x):
 
 
 def interleave(z_pre):
-    if len(z_pre.shape) == 3: # non-cached
-        x1 = z_pre[:,0::3,:]
-        x2 = z_pre[:,1::3,:]
-        v  = z_pre[:,2::3,:]
+    if len(z_pre.shape) == 3:  # non-cached
+        x1 = z_pre[:, 0::3, :]
+        x2 = z_pre[:, 1::3, :]
+        v = z_pre[:, 2::3, :]
         z_pre = torch.cat([x1, x2, v], dim=1)
         return z_pre
     else:
-        x1 = z_pre[...,0::3]
-        x2 = z_pre[...,1::3]
-        v  = z_pre[...,2::3]
+        x1 = z_pre[..., 0::3]
+        x2 = z_pre[..., 1::3]
+        v = z_pre[..., 2::3]
         z_pre = torch.concat([x1, x2, v], dim=-1)
         return z_pre
 
@@ -65,7 +64,7 @@ def column_split(x, num_heads, head_size):
         )
         x2, x1, v = (
             x2.reshape(x2.shape[0], -1, x2.shape[-1]),
-            x1.reshape(x1.shape[0], -1, x1.shape[-1]), 
+            x1.reshape(x1.shape[0], -1, x1.shape[-1]),
             v.reshape(v.shape[0], -1, v.shape[-1]),
         )
         return x2, x1, v
@@ -102,7 +101,9 @@ class dotdict(dict):
 
 def ensure_divisibility(numerator, denominator):
     """Ensure that numerator is divisible by the denominator."""
-    assert numerator % denominator == 0, "{} is not divisible by {}".format(numerator, denominator)
+    assert numerator % denominator == 0, "{} is not divisible by {}".format(
+        numerator, denominator
+    )
 
 
 def divide(numerator, denominator):
@@ -112,13 +113,24 @@ def divide(numerator, denominator):
     return numerator // denominator
 
 
+class Lambda(torch.nn.Module):
+    def __init__(self, func):
+        super().__init__()
+        self.func = func
+
+    def forward(self, x):
+        return self.func(x)
+
+
 class VocabUtility:
     """Split the vocabulary into `world_size` chunks amd return the
     first and last index of the vocabulary belonging to the `rank`
     partition: Note that indices in [first, last]"""
 
     @staticmethod
-    def vocab_range_from_per_partition_vocab_size(per_partition_vocab_size, rank, world_size):
+    def vocab_range_from_per_partition_vocab_size(
+        per_partition_vocab_size, rank, world_size
+    ):
         index_f = rank * per_partition_vocab_size
         index_l = index_f + per_partition_vocab_size
         return index_f, index_l
@@ -126,4 +138,6 @@ class VocabUtility:
     @staticmethod
     def vocab_range_from_global_vocab_size(global_vocab_size, rank, world_size):
         per_partition_vocab_size = divide(global_vocab_size, world_size)
-        return VocabUtility.vocab_range_from_per_partition_vocab_size(per_partition_vocab_size, rank, world_size)
+        return VocabUtility.vocab_range_from_per_partition_vocab_size(
+            per_partition_vocab_size, rank, world_size
+        )

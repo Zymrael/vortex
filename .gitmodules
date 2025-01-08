@@ -1,0 +1,4 @@
+ 
+[submodule "vortex/ops/cutlass"]
+	path = vortex/ops/cutlass
+	url = https://github.com/NVIDIA/cutlass.git

@@ -4,23 +4,28 @@
 
 
 import argparse
-import os
 
 import torch
 import yaml
 
-from vortex.model.generation import Generator
 from vortex.model.model import StripedHyena
-from vortex.model.sample import sample
 from vortex.model.tokenizer import HFAutoTokenizer, CharLevelTokenizer
 from vortex.model.utils import dotdict, print_rank_0
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run StripedHyena Model")
-    parser.add_argument("--config_path", required=True, help="Path to configuration file")
-    parser.add_argument("--logits_path",  help="Path to dummy savanna logits for numerical accuracy.")
-    parser.add_argument("--checkpoint_path", default=None, help="Path to checkpoint file")
-    parser.add_argument("--prompt_file", default="./prompt.txt", help="Path to prompt file.")
+    parser.add_argument(
+        "--config_path", required=True, help="Path to configuration file"
+    )
+    parser.add_argument(
+        "--logits_path", help="Path to dummy savanna logits for numerical accuracy."
+    )
+    parser.add_argument(
+        "--checkpoint_path", default=None, help="Path to checkpoint file"
+    )
+    parser.add_argument(
+        "--prompt_file", default="./prompt.txt", help="Path to prompt file."
+    )
     parser.add_argument(
         "--cached_generation",
         action="store_true",
@@ -37,23 +42,21 @@ if __name__ == "__main__":
         tokenizer = CharLevelTokenizer(config.vocab_size)
     else:
         tokenizer = HFAutoTokenizer(config.vocab_file)
-    
-    config.cached_generation = False 
+
+    # config.cached_generation = False
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     with torch.device(device):
         m = StripedHyena(config).to(torch.float32)
 
     if args.checkpoint_path:
         state_dict = torch.load(args.checkpoint_path, map_location=device)
-        #print(m.state_dict().keys())
-        #print(state_dict.keys())
         m.custom_load_state_dict(state_dict, strict=False)
 
     m = m.to(device)
 
     m.to_bfloat16_except_pr_lc()
-    
-    logits_savanna = torch.load(args.logits_path, map_location=device) 
+
+    logits_savanna = torch.load(args.logits_path, map_location=device)
     print(logits_savanna.shape)
 
     with open(args.prompt_file, "r") as f:
@@ -66,13 +69,10 @@ if __name__ == "__main__":
     logits_vortex = m.forward(inputs)
 
     breakpoint()
-    #logits_garyk = torch.load('/home/gbrixi/dnagen/eval/bin/evo2_7b_ACTG.pt', map_location=device)
-
+    # logits_garyk = torch.load('/home/gbrixi/dnagen/eval/bin/evo2_7b_ACTG.pt', map_location=device)
 
     # print(logits_vortex)
 
     # print(logits_savanna)
 
     # print(logits_garyk)
-
-

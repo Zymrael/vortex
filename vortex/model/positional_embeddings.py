@@ -5,12 +5,9 @@ Wrappers for linearly interpolated rope embeddings to use inside of MHA layers o
 
 """
 
-import copy
-
 import torch
 from einops import rearrange
 from flash_attn.layers.rotary import RotaryEmbedding
-from flash_attn.modules.mha import MHA
 
 
 # simple wrapper for flash-attn RoPE with linear scaling:
@@ -76,9 +73,14 @@ class LinearlyScaledRotaryEmbedding(RotaryEmbedding):
                 self._sin_cached = torch.sin(freqs).to(dtype)
             else:
                 power = (
-                    torch.arange(seqlen, dtype=self.scale.dtype, device=self.scale.device) - seqlen // 2
+                    torch.arange(
+                        seqlen, dtype=self.scale.dtype, device=self.scale.device
+                    )
+                    - seqlen // 2
                 ) / self.scale_base
-                scale = self.scale.to(device=power.device) ** rearrange(power, "s -> s 1")
+                scale = self.scale.to(device=power.device) ** rearrange(
+                    power, "s -> s 1"
+                )
                 # We want the multiplication by scale to happen in fp32
                 self._cos_cached = (torch.cos(freqs) * scale).to(dtype)
                 self._sin_cached = (torch.sin(freqs) * scale).to(dtype)
@@ -87,7 +89,11 @@ class LinearlyScaledRotaryEmbedding(RotaryEmbedding):
 
 
 # swap out RoPE of existing mha:
-def swap_mha_rope(mha, new_rope: torch.nn.Module = LinearlyScaledRotaryEmbedding, kwargs_new_rope: dict = None):
+def swap_mha_rope(
+    mha,
+    new_rope: torch.nn.Module = LinearlyScaledRotaryEmbedding,
+    kwargs_new_rope: dict = None,
+):
     # determine mha dtype and device:
     dtype = mha.Wq.weight.dtype if mha.cross_attn else mha.Wqkv.weight.dtype
     device = mha.Wq.weight.device if mha.cross_attn else mha.Wqkv.weight.device

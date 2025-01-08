@@ -1,5 +1,4 @@
 import argparse
-import os
 import sys
 
 import torch
@@ -18,7 +17,7 @@ def main(args):
     config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
     config.use_cache = True
     device = torch.device("cuda")
-    
+
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         config=config,

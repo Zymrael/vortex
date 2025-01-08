@@ -1,11 +1,5 @@
 # Copyright (c) 2024, Michael Poli.
 
-# Copyright (c) Together
-# This software is distributed under the terms of the Apache License, Version 2.0
-# Author: Michael Poli
-
-# Barebones generation class for standalone inference.
-
 import torch
 
 from vortex.model.sample import sample
@@ -34,6 +28,7 @@ class Generator:
         skip_special_tokens=False,
         stop_at_eos=True,
         max_seqlen=None,
+        token_callback=lambda i: None,
     ):
         if isinstance(self.tokenizer.eos, int):
             eos_token_ids = torch.LongTensor([self.tokenizer.eos]).to(device)
@@ -110,7 +105,7 @@ class Generator:
                     inference_params_dict_out["hcl"].seqlen_offset = seqlen_offset
                     inference_params_dict_out["hcm"].seqlen_offset = seqlen_offset
                     inference_params_dict_out["hcs"].seqlen_offset = seqlen_offset
-                    
+
                 else:
                     inference_params_dict_out["mha"].seqlen_offset += 1
                     inference_params_dict_out["hcl"].seqlen_offset += 1
@@ -124,9 +119,13 @@ class Generator:
                     inference_params_dict=inference_params_dict_out,
                 )
 
+            token_callback(i)
+
             last_logits = logits[:, -1]
             if print_generation and verbose and batch_size == 1:
-                print(last_logits.shape, last_logits.min(), last_logits.max(), last_logits)
+                print(
+                    last_logits.shape, last_logits.min(), last_logits.max(), last_logits
+                )
 
             new_idx = sample(
                 last_logits,

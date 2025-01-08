@@ -4,15 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vortex"
-version = "0.0.1"
-description = ""
+version = "0.0.2"
+description = "Reference implementation of operators for deep signal processing architectures"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [{ name = "Michael Poli"}]
+requires-python = ">=3.11"
 dependencies = [
-    "transformers",
-    "tokenizers",
-    "flash_attn>=2.0.0"
+    "torch==2.5.1",
+    "rich==13.9.2",
+    "ruff==0.1.1",
+    "pre-commit==4.0.1",
+    "packaging",
+    "pip",
 ]
 
 [tool.black]
@@ -26,4 +30,6 @@ combine_star = true
 
 [tool.setuptools]
 packages = ['vortex']
+
+
 

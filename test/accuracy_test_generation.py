@@ -9,14 +9,7 @@ import numpy as np
 from Bio import Align
 from Bio.Seq import Seq
 
-import torch
 import yaml
-
-from vortex.model.generation import Generator
-from vortex.model.model import StripedHyena
-from vortex.model.sample import sample
-from vortex.model.tokenizer import HFAutoTokenizer, CharLevelTokenizer
-from vortex.model.utils import dotdict, print_rank_0
 
 
 def read_prompts(
@@ -33,21 +26,25 @@ def read_prompts(
 
     return promptseqs
 
+def mid_point_split(*, seq, num_tokens):
+    mid_point = 3*(len(seq)//4)
+    prompt = seq[:mid_point]
+    target = seq[mid_point:mid_point+num_tokens] #Only compare to the section of sequence directly
+    return prompt, target
 
 def generate_and_score(sequences, generator, tokenizer, args, generations_per_prompt=5, device='cuda:0'):
     """
     Prompt with first half, generate and score on 2nd half
     """
+    import torch
+
     scores = []
     prompts = []
     targets = []
     
     # Prepare all prompts and targets
     for seq in sequences:
-        mid_point = 3*(len(seq)//4)
-        
-        prompt = seq[:mid_point]
-        target = seq[mid_point:mid_point+args.num_tokens] #Only compare to the section of sequence directly
+        prompt, target = mid_point_split(seq=seq, num_tokens=args.num_tokens)
         
         # Repeat prompt for multiple generations
         prompts.extend([prompt] * generations_per_prompt)
@@ -105,11 +102,17 @@ def calculate_sequence_identity(seq1: str, seq2: str, amino_acids=False) -> Opti
 
     return (matches / min(len(seq1),len(seq2))) * 100
 
-
-if __name__ == "__main__":
+def main():
     '''
     python ./test/generation/test_generation.py --config_path <config_path> --checkpoint_path <path.pt>
     '''
+    import torch
+
+    from vortex.model.generation import Generator
+    from vortex.model.model import StripedHyena
+    from vortex.model.tokenizer import HFAutoTokenizer, CharLevelTokenizer
+    from vortex.model.utils import dotdict
+
     parser = argparse.ArgumentParser(description="Run StripedHyena Model")
     parser.add_argument("--config_path", required=True, help="Path to configuration file")
     parser.add_argument("--checkpoint_path", default=None, help="Path to checkpoint file")
@@ -155,3 +158,6 @@ if __name__ == "__main__":
     print(scores)
     print("\% Matching Nucleotides")
     print(np.mean(scores))
+
+if __name__ == "__main__":
+    main()

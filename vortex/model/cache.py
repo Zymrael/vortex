@@ -1,8 +1,5 @@
 # Copyright (c) 2024, Michael Poli.
 
-# Copyright (c) Together
-# This software is distributed under the terms of the Apache License, Version 2.0
-# Author: Michael Poli
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -45,6 +42,7 @@ class HyenaCascadeIIRInferenceParams:
         self.fir_filter_length = 3
         self.state_dim = 16
         self.seqlen_offset = 0
+
 
 @dataclass
 class HyenaCascadeFIRInferenceParams:
