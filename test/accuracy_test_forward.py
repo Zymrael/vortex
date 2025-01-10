@@ -39,7 +39,8 @@ def test_dna_model(model, device='cuda:0'):
         dtype=torch.int,
     ).to(device).unsqueeze(0)
 
-    output1, _ = model.forward(input_ids)
+    with torch.no_grad():
+        output1, _ = model.forward(input_ids)
     logprobs = torch.log_softmax(output1[:, :-1, :], dim=-1)
     chars = torch.argmax(logprobs, dim=-1)
 
