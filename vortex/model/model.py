@@ -396,20 +396,6 @@ class ParallelGatedConvBlock(nn.Module):
         mlp_dtype = config.get("mlp_dtype", torch.bfloat16)
         self.pre_norm, self.post_norm = RMSNorm(config).to(dtype=dtype), RMSNorm(config).to(dtype=dtype)
         self.filter = HyenaCascade(config, layer_idx, hyena_filter_groups=self.hyena_filter_groups, fir_inner_filter_length=fir_inner_filter_length).to(dtype=dtype)
-        
-        # # if torch.cuda.device_count() != 1:
-        #     self.projections = nn.Linear(config.hidden_size, 3 * config.hidden_size, bias=config.qkv_proj_bias).to(dtype)
-        #     print("TELinear and FP8 not yet supported for n_gpu != 1, defaulting to nn.Linear")
-        # else:
-
-        # self.projections = Linear(
-        #     in_features=config.hidden_size,
-        #     out_features=3 * config.hidden_size,
-        #     params_dtype=torch.bfloat16,
-        #     bias=config.qkv_proj_bias,
-        #     # return_bias=False,
-        # ).to(dtype=dtype)
-
         self.projections = TELinear(
             config.hidden_size,
             3 * config.hidden_size,
@@ -458,18 +444,11 @@ class ParallelGatedConvBlock(nn.Module):
                 activations_logger.info(f"pre norm scale: {self.pre_norm.scale}, {self.pre_norm.scale.min()}, {self.pre_norm.scale.max()}")
         
         normalized = self.pre_norm(x)
-        print('post norm')
-        print(torch.mean(torch.abs(normalized)))
         normalized = self.pad_to_multiple(normalized)
         projected = self.projections(normalized)
         
         if isinstance(projected, tuple):
             projected = projected[0]
-        print('post proj')
-        print(torch.mean(torch.abs(projected)))
-        print("\nTE Linear layer info:")
-        print(f'Layer device: {self.projections.weight.device}')
-        print(f'Layer device: {self.projections.weight}')
 
         original_seq_len = x.size(1)
         # Slice back to original sequence length if padding was added
@@ -614,8 +593,6 @@ class StripedHyena(nn.Module):
             self.block_idx_to_device[layer_idx] = device
             self.logger.info(f"Assigned {layer_idx=} to {device=}")
         
-        print(self.block_idx_to_device)
-
         with torch.device(self.block_idx_to_device[0]):
             self.norm = RMSNorm(config) if config.get("final_norm", True) else None
             if config.tie_embeddings:
