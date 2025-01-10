@@ -54,8 +54,10 @@ if __name__ == "__main__":
 
     if not args.dry_run:
         if args.checkpoint_path:
+            is_7b = "7b" in config.model_name.split("-")
+            strict = not is_7b # 7b requires non-strict loading
             # inv_freq are instantiated as parameters
-            m.custom_load_state_dict(torch.load(args.checkpoint_path, map_location=device), strict=True)
+            m.custom_load_state_dict(torch.load(args.checkpoint_path, map_location=device), strict=strict)
 
     m.to_bfloat16_except_pr_lc()
 
