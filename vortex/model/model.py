@@ -445,7 +445,8 @@ class ParallelGatedConvBlock(nn.Module):
         
         normalized = self.pre_norm(x)
         normalized = self.pad_to_multiple(normalized)
-        projected = self.projections(normalized)
+        with torch.cuda.device(x.device):
+            projected = self.projections(normalized)
         
         if isinstance(projected, tuple):
             projected = projected[0]
