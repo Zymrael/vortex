@@ -3,10 +3,15 @@ set -e -o pipefail
 
 cd "$(dirname "$0")"
 
-ckpt=--checkpoint_path=iter_500000.pt
-cfg=--config_path=configs/shc-evo2-7b-8k-2T-v2.yml
+if [ "$sz" == "7" ]; then
+    cfg=${cfg:-configs/shc-evo2-7b-8k-2T-v2-interleave.yml}
+    ckpt=${ckpt:-iter_500000.pt}
+else
+    cfg=${cfg:-configs/shc-evo2-40b-8k-11T-v2.yml}
+    ckpt=${ckpt:-iter_504000.pt}
+fi
 
 export PYTHONPATH=.
 
-python3 test/accuracy_test_generation.py $ckpt $cfg
-python3 test/accuracy_test_forward.py    $ckpt $cfg
+python3 test/accuracy_test_forward.py    --config_path $cfg --checkpoint_path $ckpt
+python3 test/accuracy_test_generation.py --config_path $cfg --checkpoint_path $ckpt

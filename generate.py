@@ -12,7 +12,7 @@ import yaml
 from vortex.model.generation import Generator
 from vortex.model.model import StripedHyena
 from vortex.model.tokenizer import HFAutoTokenizer, CharLevelTokenizer
-from vortex.model.utils import dotdict, print_rank_0
+from vortex.model.utils import dotdict, print_rank_0, load_checkpoint
 
 import logging
 
@@ -61,19 +61,12 @@ if __name__ == "__main__":
         tokenizer = HFAutoTokenizer(config.vocab_file)
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    with torch.device(device):
-        m = StripedHyena(config).to(torch.float32)
+    m = StripedHyena(config)
 
-    if not args.dry_run:
-        if args.checkpoint_path:
-            is_7b = "7b" in config.model_name.split("-")
-            strict = not is_7b # 7b requires non-strict loading
-            # inv_freq are instantiated as parameters
-            m.custom_load_state_dict(
-                torch.load(args.checkpoint_path, map_location=device), strict=strict
-            )
+    if args.dry_run:
+        args.checkpoint_path = None
 
-    m.to_bfloat16_except_pr_lc()
+    load_checkpoint(m, args.checkpoint_path)
 
     print_rank_0(f"Number of parameters: {sum(p.numel() for p in m.parameters())}")
 

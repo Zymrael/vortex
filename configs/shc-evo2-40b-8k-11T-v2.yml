@@ -59,4 +59,4 @@ inference_mode: True
 tokenizer_type: CharLevelTokenizer 
 prefill_style: fft
 mlp_activation: gelu
-print_activations: True
+print_activations: False

@@ -16,7 +16,7 @@ from vortex.model.generation import Generator
 from vortex.model.model import StripedHyena
 from vortex.model.sample import sample
 from vortex.model.tokenizer import HFAutoTokenizer, CharLevelTokenizer
-from vortex.model.utils import dotdict, print_rank_0
+from vortex.model.utils import dotdict, print_rank_0, load_checkpoint
 
 def test_dna_model(model, device='cuda:0'):
     """
@@ -102,9 +102,6 @@ if __name__ == "__main__":
     
     m = StripedHyena(config)
 
-    if args.checkpoint_path:
-        with torch.inference_mode():
-            m.custom_load_state_dict(torch.load(args.checkpoint_path), strict=False)
+    load_checkpoint(m, checkpoint_path=args.checkpoint_path)
 
-    m.to_bfloat16_except_pr_lc()
     test_dna_model(m)

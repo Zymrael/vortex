@@ -113,7 +113,7 @@ def main():
     from vortex.model.generation import Generator
     from vortex.model.model import StripedHyena
     from vortex.model.tokenizer import HFAutoTokenizer, CharLevelTokenizer
-    from vortex.model.utils import dotdict
+    from vortex.model.utils import dotdict, load_checkpoint
 
     parser = argparse.ArgumentParser(description="Run StripedHyena Model")
     parser.add_argument("--config_path", required=True, help="Path to configuration file")
@@ -145,10 +145,7 @@ def main():
     with torch.device(device):
         m = StripedHyena(config).to(torch.float32)
 
-    if args.checkpoint_path:
-        m.custom_load_state_dict(torch.load(args.checkpoint_path, map_location=device), strict=False)
-
-    m.to_bfloat16_except_pr_lc()
+    load_checkpoint(m, checkpoint_path=args.checkpoint_path)
 
     g = Generator(m, tokenizer, top_k=args.top_k, top_p=args.top_p, temperature=args.temperature)
 

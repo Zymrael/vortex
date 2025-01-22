@@ -18,7 +18,7 @@ from vortex.model.layers import (
     VocabParallelUnembedding,
     TELinear,
 )
-from vortex.model.utils import Lambda, column_split, interleave, print_rank_0, move_to_device
+from vortex.model.utils import Lambda, column_split, interleave, print_rank_0, move_to_device, fixup_fp8_extra_states
 from vortex.logging import activations_logger, enable_activations_logging
 
 import logging
@@ -461,6 +461,10 @@ class ParallelGatedConvBlock(nn.Module):
             hyena_filter_groups=self.hyena_filter_groups,
             fir_inner_filter_length=fir_inner_filter_length,
         ).to(dtype=dtype)
+
+        # For posterity/debugging: TELinear can be easily replaced by
+        # nn.Linear(config.hidden_size, 3 * config.hidden_size, bias=config.qkv_proj_bias)
+        # which sometimes is very useful when debugging FP8.
         self.projections = TELinear(
             config.hidden_size,
             3 * config.hidden_size,
@@ -469,8 +473,6 @@ class ParallelGatedConvBlock(nn.Module):
             use_fp8=config.get("use_fp8_input_projections", False),
         )
 
-        # TODO: commented out. why not assigned anywhere?
-        # nn.Linear(config.hidden_size, 3 * config.hidden_size, bias=config.qkv_proj_bias)
         self.out_filter_dense = nn.Linear(
             config.hidden_size, config.hidden_size, bias=config.hyena_out_proj_bias
         ).to(dtype)
@@ -949,7 +951,13 @@ class StripedHyena(nn.Module):
 
         filtered_dict = {k: v for k, v in state_dict.items() if k in model_dict}
 
+        if all("._extra_state" in k for k in missing_in_state_dict):
+            self.logger.info("Checkpoint has no FP8 extra state, will be using initial state.")
+            for k in missing_in_state_dict:
+                filtered_dict[k] = None
+
         self.load_state_dict(filtered_dict, strict=strict)
+        fixup_fp8_extra_states(self)
 
         if self.config.get("column_split", True):
             self.logger.info("Adjusting Wqkv for column split (permuting rows)")
