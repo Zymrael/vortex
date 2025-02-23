@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -e -o pipefail
+
+cd "$(dirname "$0")"
+
+if [ "$sz" == "7" ]; then
+    cfg=${cfg:-configs/evo2-7b-1m.yml}
+    ckpt=${ckpt:-evo2_7b.pt}
+else
+    cfg=${cfg:-configs/evo2-40b-1m.yml}
+    ckpt=${ckpt:-evo2_40b.pt}
+fi
+
+export PYTHONPATH=.
+
+python3 test/test_evo2_forward.py    --config_path $cfg --checkpoint_path $ckpt
+python3 test/test_evo2_generation.py --config_path $cfg --checkpoint_path $ckpt

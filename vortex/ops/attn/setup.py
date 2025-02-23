@@ -230,7 +230,7 @@ setup(
             "bdist_wheel": CachedWheelsCommand,
         }
     ),
-    python_requires=">=3.11",
+    python_requires=">=3.10",
     install_requires=[
         "torch",
         "einops",

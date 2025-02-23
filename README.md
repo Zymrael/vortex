@@ -16,6 +16,22 @@ There are two main ways to interface with `vortex`:
 1. Use `vortex` as the inference engine for pre-trained multi-hybrids such as [Evo 2 40B](configs/evo2-40b-1m.yml). In this case, we recommend installing `vortex` in a new environment (see below).
 2. Import from `vortex` specific classes, kernels or utilities to work with custom convolutional multi-hybrids. For example,sourcing utilities from `hyena_ops.interface`.
 
+## Running in a Docker Environment
+
+Docker is one of the easiest ways to get started with Vortex (and Evo 2). The
+Docker environment does not depend on the currently installed CUDA version and
+ensures that major dependencies (such as PyTorch and Transformer Engine) are
+pinned to specific versions, which is beneficial for reproducibility.
+
+To run Evo 2 40B generation sample, simply run `./run`.
+
+To run Evo 2 7B generation sample: `sz=7 ./run`.
+
+To run tests: `./run ./run_tests`.
+
+To interactively execute commands in docker environment: `./run bash`.
+
+For non-Docker setup, please follow instructions below.
 
 ## 1. Quick install for vortex ops
 

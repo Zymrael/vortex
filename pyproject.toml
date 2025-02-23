@@ -12,7 +12,7 @@ description = "Reference implementation of operators for deep signal processing 
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [{ name = "Michael Poli"}]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 dependencies = [
     "torch==2.5.1",
     "rich==13.9.2",
@@ -27,6 +27,13 @@ dependencies = [
     "tqdm",
     "setuptools",
 ]
+
+[project.optional-dependencies]
+# Technically, these are required dependencies, but those use legacy builds and
+# UV cannot handle them in the most general case. See
+# https://github.com/astral-sh/uv/issues/7405
+# Instead, those are handled specially via Makefile and Dockerfile
+special = ["transformer_engine[pytorch]==1.13.0"]
 
 [tool.black]
 line-length = 119
