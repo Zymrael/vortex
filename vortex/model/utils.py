@@ -142,22 +142,24 @@ def fixup_fp8_extra_states(module):
     """Recursively fixes device location of TE's Linear fp8 extra states."""
     for child in module.children():
         fixup_fp8_extra_states(child)
-
-    # TE Linear uses default "cuda" device to load extra state, which causes
-    # trouble when the layer is moved to another GPU. Instead, this is how
-    # TE Linear should load extra_state: using parameters' device.
-    torch_load = torch.load
-
-    def overriden_load(state, map_location):
-        device = next(module.parameters()).device
-        return torch_load(state, map_location=device)
-
     if hasattr(module, "fp8_meta"):
         log.debug(f"Reloading fp8 extra state to a proper device for {module}")
-        from unittest.mock import patch
 
-        with patch("torch.load", new=overriden_load):
+        # Must set to false, otherwise set_extra_state will be no-op
+        module.fp8_meta_tensors_initialized = False
+
+        # TE Linear uses default "cuda" device to load extra state, which causes
+        # trouble when the layer is moved to another GPU. Instead, this is how
+        # TE Linear should load extra_state: using parameters' device.
+        device = next(module.parameters()).device
+        with torch.cuda.device(device):
             module.set_extra_state(module.get_extra_state())
+
+        # Make sure we actually fixed everything we wanted.
+        for k in ["scaling_fwd", "scaling_bwd"]:
+            for attr in ["amax_history", "scale", "scale_inv"]:
+                tensor = getattr(module.fp8_meta[k], attr)
+                assert tensor.device == device, (k, tensor, device)
 
 
 def fixup_te_workspace():
