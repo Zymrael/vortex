@@ -99,22 +99,41 @@ def load_checkpoint(model, checkpoint_path):
     torch.serialization.add_safe_globals([io.BytesIO])
 
     with torch.inference_mode():
-        state = torch.load(
-            checkpoint_path,
-            # Make sure we override device location that is specified in the
-            # checkpoint dictionary (e.g. checkpoints may have "cuda:0"
-            # as a location for all layers, which then wouldn't work for
-            # multi-GPU case.)
-            map_location="cpu",
-            # This is an optimization: with that, we don't actually read
-            # whole checkpoints dictionary from disk to CPU memory in one
-            # go; instead, pytorch would only load relevant layers to CPU
-            # memory when we are about to copy them to GPU.
-            mmap=True,
-            # Make sure PyTorch is not issuing a warning regarding potential
-            # security issues.
-            weights_only=True,
-        )
+        try:
+            # Attempt safe loading (weights_only=True). This avoids executing
+            # any pickled code embedded in the checkpoint while still loading
+            # tensor data. It relies on BytesIO being allow-listed above.
+            state = torch.load(
+                checkpoint_path,
+                # Override any device location stored in the checkpoint (e.g.
+                # "cuda:0") so it is loaded on CPU first and then moved to
+                # the appropriate GPU(s) by Vortex.
+                map_location="cpu",
+                # Lazy-mmap so that tensors are materialised only when first
+                # accessed, drastically reducing peak RAM during load.
+                mmap=True,
+                # Security: restrict loading to tensor data only.
+                weights_only=True,
+            )
+        except Exception as e:
+            # Fallback path for checkpoints that include objects PyTorch's
+            # strict weights-only loader doesn't understand (e.g. older TE
+            # FP8 tensors). This disables the safety filter, so **only** use
+            # with trusted checkpoints.
+            log.warning(
+                "weights_only load failed (%s); retrying with weights_only=False. "
+                "This may execute arbitrary code – make sure the checkpoint is trusted.",
+                e,
+            )
+            state = torch.load(
+                checkpoint_path,
+                # Same device override as above.
+                map_location="cpu",
+                mmap=True,
+                # Full unpickling – unsafe but required for some legacy FP8
+                # checkpoints that store custom objects like _io.BytesIO.
+                weights_only=False,
+            )
         model.to_bfloat16_except_pr_lc(to_float32=True)
 
         model.custom_load_state_dict(state)

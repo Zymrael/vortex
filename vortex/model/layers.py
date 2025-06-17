@@ -19,7 +19,7 @@ except ImportError:
 
 def set_format_recipe():
     fp8_format = Format.HYBRID  # E4M3 during forward pass, E5M2 during backward pass
-    fp8_recipe = DelayedScaling(fp8_format=fp8_format, amax_history_len=16, amax_compute_algo="max")
+    fp8_recipe = DelayedScaling(fp8_format=fp8_format, amax_history_len=1024, amax_compute_algo="max")
     return fp8_format, fp8_recipe
 
 
