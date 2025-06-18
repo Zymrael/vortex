@@ -58,7 +58,7 @@ ext_modules = [
         name="hyena_ops",
         version="0.1.1",
         packages=find_packages(),
-        python_requires=">=3.11",
+        python_requires=">=3.10,<3.13",
         package_dir={"": "."},
     ),
 )
@@ -69,7 +69,7 @@ setup(
     version="0.1.1",
     packages=find_packages(),
     ext_modules=ext_modules,
-    python_requires=">=3.11",
+    python_requires=">=3.10,<3.13",
     package_dir={"": "."},
     install_requires=[
         "torch",
