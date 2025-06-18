@@ -678,34 +678,45 @@ class StripedHyena(nn.Module):
         self.logger.info("Initialized model")
 
     def forward(self, x, inference_params_dict=None, padding_mask=None):
-        L = x.shape[1]
-        if self.print_activations:
-            activations_logger.info(f"pre embedding: {x}, {x.min()}, {x.max()}")
+        """Top-level forward pass.
 
-        x = self.embedding_layer(x)
+        The entire computation is executed under a `torch.cuda.amp.autocast` context
+        so that all operations run in BF16 by default.  This guarantees that BF16
+        precision is used consistently throughout the network and removes any
+        dependency on NVTE's FP8 pathways.
+        """
 
-        if self.print_activations:
-            activations_logger.info(f"post embedding: {x}, {x.min()}, {x.max()}")
+        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+            L = x.shape[1]
 
-        if inference_params_dict is not None:
-            x, inference_params_dict_out = self.stateful_forward(
-                x,
-                inference_params_dict=inference_params_dict,
-            )
-        else:
-            x, inference_params_dict_out = self.stateless_forward(x, padding_mask=padding_mask)
+            if self.print_activations:
+                activations_logger.info(f"pre embedding: {x}, {x.min()}, {x.max()}")
 
-        if self.print_activations:
-            activations_logger.info(f"pre norm: {x}, {x.min()}, {x.max()}")
+            x = self.embedding_layer(x)
 
-        # By convention, we return results on the first device
-        x = x.to(self.block_idx_to_device[0])
-        x = self.norm(x)
+            if self.print_activations:
+                activations_logger.info(f"post embedding: {x}, {x.min()}, {x.max()}")
 
-        if self.print_activations:
-            activations_logger.info(f"post norm: {x}, {x.min()}, {x.max(), {self.norm.scale}}")
+            if inference_params_dict is not None:
+                x, inference_params_dict_out = self.stateful_forward(
+                    x,
+                    inference_params_dict=inference_params_dict,
+                )
+            else:
+                x, inference_params_dict_out = self.stateless_forward(x, padding_mask=padding_mask)
 
-        x = self.unembed(x)
+            if self.print_activations:
+                activations_logger.info(f"pre norm: {x}, {x.min()}, {x.max()}")
+
+            # By convention, we return results on the first device
+            x = x.to(self.block_idx_to_device[0])
+            x = self.norm(x)
+
+            if self.print_activations:
+                activations_logger.info(f"post norm: {x}, {x.min()}, {x.max(), {self.norm.scale}}")
+
+            x = self.unembed(x)
+
         return x, inference_params_dict_out
 
     def block_idx_to_name(self, block_idx):

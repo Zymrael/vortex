@@ -7,9 +7,12 @@ from torch import Tensor
 from typing import Callable
 from vortex.model.utils import grab_first_if_tuple
 
-from transformer_engine.pytorch import Linear
+# NOTE: NVTE's FP8 support has been deprecated in this branch.  The import below
+# is kept **commented out** for historical reference and to ease potential
+# reinstatement should the project decide to re-enable FP8 support in future.
+# from transformer_engine.pytorch import te
 from transformer_engine.common.recipe import Format, DelayedScaling
-import transformer_engine.pytorch as te
+from transformer_engine.pytorch import Linear
 
 try:
     from hyena_ops import hyena_se_fwd, hyena_mr_fwd, hyena_li_fwd
@@ -73,11 +76,20 @@ class TELinear(Linear):
         )
 
     def forward(self, x):
-        if self.use_fp8_input_projections:
-            with te.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
-                out = super().forward(x)
-        else:
-            out = super().forward(x)
+        # The FP8 autocast context has been retired.  The original implementation
+        # looked like this:
+        #
+        #     if self.use_fp8_input_projections:
+        #         with te.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
+        #             out = super().forward(x)
+        #     else:
+        #         out = super().forward(x)
+        #
+        # Instead, we now call the parent forward directly; the entire
+        # model's forward pass is executed under a BF16 autocast at the
+        # top-level.
+
+        out = super().forward(x)
 
         # TE only returns a tuple when return_bias is True, otherwise
         # it returns a single Tensor, we always want to return two

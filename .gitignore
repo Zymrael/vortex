@@ -12,4 +12,5 @@
 *.o
 .ninja_deps
 .ninja_log
-build.ninja
+build.ninjaactivations_debug.log
+activations_debug.log
