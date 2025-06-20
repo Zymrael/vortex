@@ -2,6 +2,3 @@
 [submodule "vortex/ops/cutlass"]
 	path = vortex/ops/cutlass
 	url = https://github.com/NVIDIA/cutlass.git
-[submodule "vortex/ops/transformer_engine"]
-	path = vortex/ops/transformer_engine
-	url = https://github.com/NVIDIA/TransformerEngine

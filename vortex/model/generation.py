@@ -285,7 +285,7 @@ def generate(
     top_p: float = 1.0,
     batched: bool = True,
     prepend_bos: bool = False,
-    force_prompt_threshold: int = 1000,
+    force_prompt_threshold: int = 3000,
     cached_generation: bool = True,
     verbose: int = 1,
     device: str = "cuda:0",

@@ -1,4 +1,0 @@
-torch>=2.6.0
-rich
-ruff
-pre-commit

@@ -1,0 +1,7 @@
+recursive-include vortex *.py
+recursive-include vortex *.cpp *.cu *.h *.hpp *.cuh *.so
+recursive-include vortex/ops/attn/csrc/flash_attn *.cpp *.cu *.hpp
+recursive-include cutlass/include *.h
+include LICENSE
+include NOTICE
+include README.md

@@ -65,7 +65,6 @@ def generate_and_score(*, sequences, model, tokenizer, args, generations_per_pro
                 device=device,
                 verbose=1,
                 cached_generation=args.cached_generation,
-                force_prompt_threshold=5000,
             )
 
             decoded_seq = ret.sequences[0]
