@@ -443,8 +443,8 @@ class ParallelGatedConvBlock(nn.Module):
 
     def pad_to_multiple(self, x, multiple=16):
         """Pad input tensor to multiple of 16 only when FP8 is enabled"""
-        if not self.config.get("use_fp8_input_projections", False):
-            return x
+        # if not self.config.get("use_fp8_input_projections", True):
+        #     return x
 
         batch_size, seq_len, hidden_dim = x.size()
         pad_len = (multiple - (seq_len % multiple)) % multiple
@@ -482,7 +482,10 @@ class ParallelGatedConvBlock(nn.Module):
         normalized = self.pre_norm(x)
         normalized = self.pad_to_multiple(normalized)
         with torch.cuda.device(x.device):
+            # import pdb
+            # pdb.set_trace()
             projected = self.projections(normalized)
+            pass
 
         if isinstance(projected, tuple):
             projected = projected[0]

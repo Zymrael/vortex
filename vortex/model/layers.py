@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from typing import Callable
 from vortex.model.utils import grab_first_if_tuple
-
+from collections import deque
 from transformer_engine.pytorch import Linear
 from transformer_engine.common.recipe import Format, DelayedScaling
 import transformer_engine.pytorch as te
@@ -23,6 +23,70 @@ def set_format_recipe():
     return fp8_format, fp8_recipe
 
 
+class MaxQueue:
+    def __init__(self, max_length=16):
+        self.queue = deque(maxlen=max_length)  # 存储队列元素
+        self.max_queue = deque()  # 辅助队列，用于维护最大值
+
+    def enqueue(self, item):
+        # 添加元素到队列尾部
+        self.queue.append(item)
+        # 维护最大值队列
+        while self.max_queue and self.max_queue[-1] < item:
+            self.max_queue.pop()
+        self.max_queue.append(item)
+
+    def dequeue(self):
+        # 从队列头部移除元素
+        if self.queue:
+            item = self.queue.popleft()
+            # 如果移除的元素是当前最大值，也从最大值队列中移除
+            if item == self.max_queue[0]:
+                self.max_queue.popleft()
+            return item
+        else:
+            raise IndexError("dequeue from an empty queue")
+
+    def get_max(self):
+        # 获取当前队列的最大值
+        if self.max_queue:
+            return self.max_queue[0]
+        else:
+            raise IndexError("get max from an empty queue")
+
+    def is_empty(self):
+        # 检查队列是否为空
+        return len(self.queue) == 0
+
+    def size(self):
+        # 返回队列的当前长度
+        return len(self.queue)
+
+
+class Quantizer():
+    def __init__(self):
+        self.amax = MaxQueue(max_length=16)
+    
+    def run(self, W_orig: torch.Tensor) -> torch.Tensor:
+        with torch.no_grad():
+            FP8_MIN_POS = torch.finfo(torch.float8_e4m3fn).tiny
+            FP8_MAX_VAL = torch.finfo(torch.float8_e4m3fn).max
+            W_float32 = W_orig.to(torch.float)
+
+            cur_max = W_float32.abs().max()
+            self.amax.enqueue(cur_max)
+            w_max = self.amax.get_max()
+
+            if w_max > 1e-6:
+                scale = FP8_MAX_VAL / w_max
+                W_scale = W_float32 * scale + FP8_MIN_POS - 1e-7
+                fake = W_scale.to(torch.float8_e4m3fn).to(torch.float) / scale
+            else:
+                fake = W_float32
+            fake = fake.to(torch.bfloat16)
+        return fake
+
+
 class TELinear(Linear):
     """
     Wrapper for Transformer-Engine's `Linear` layer.
@@ -31,7 +95,6 @@ class TELinear(Linear):
     yet, the tp_group passed to TE will be None and must be set later
     via set_tensor_parallel_group().
     """
-
     def __init__(
         self,
         input_size: int,
@@ -56,6 +119,11 @@ class TELinear(Linear):
         self.use_fp8_input_projections = use_fp8
         if use_fp8:
             self.fp8_format, self.fp8_recipe = set_format_recipe()
+        else:
+            # import pdb
+            # pdb.set_trace()
+            # fake fp8 weight
+            pass
 
         super().__init__(
             in_features=input_size,
@@ -71,14 +139,23 @@ class TELinear(Linear):
             return_bias=self.te_return_bias,
             **kwargs,
         )
+        self.w_quantizer = Quantizer()
+        self.x_quantizer = Quantizer()
+        # self.weight = torch.nn.Parameter(self.convert(self.weight))
 
     def forward(self, x):
         if self.use_fp8_input_projections:
+            
+            # w_fake = self.w_quantizer.run(self.weight)
+            # x_fake = self.x_quantizer.run(x)
+            # out_fake = x_fake @ w_fake.T
+            # return out_fake
+
             with te.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
                 out = super().forward(x)
+
         else:
             out = super().forward(x)
-
         # TE only returns a tuple when return_bias is True, otherwise
         # it returns a single Tensor, we always want to return two
         # values regardless of the arguments.
