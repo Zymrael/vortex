@@ -7,12 +7,6 @@ CONDA_ENV_NAME := vortex
 
 PYTHON_VERSION := $(shell $(PYTHON) -c 'import sys; print(sys.version_info[0])')
 TARGET_PYTHON_VERSION := 3.11
-CUDA_PATH := /usr/local/cuda
-CUDA_INCLUDE_PATH := $(CUDA_PATH)/include
-CUDA_LIB_PATH := $(CUDA_PATH)/lib64
-CPATH := $(CUDA_INCLUDE_PATH):/usr/local/cuda/include
-CUDACXX := /usr/local/cuda/bin/nvcc
-CUDA_HOME := $(CUDA_PATH)
 
 _detect_cuda_path:
 ifndef CUDA_PATH
@@ -21,8 +15,16 @@ ifndef CUDA_PATH
         # Derive CUDA_PATH by going one directory up from nvcc's bin directory
         CUDA_PATH := $(dir $(NVCC_BIN))..
         CUDA_PATH := $(realpath $(CUDA_PATH))
+    else
+        CUDA_PATH := /usr/local/cuda
     endif
 endif
+
+CUDA_INCLUDE_PATH := $(CUDA_PATH)/include
+CUDA_LIB_PATH := $(CUDA_PATH)/lib64
+CPATH := $(CUDA_INCLUDE_PATH):/usr/local/cuda/include
+CUDACXX := $(CUDA_PATH)/bin/nvcc
+CUDA_HOME ?= $(CUDA_PATH)
 
 _check_env_enabled:
 ifneq ($(VIRTUAL_ENV),)
