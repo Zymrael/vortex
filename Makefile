@@ -90,4 +90,4 @@ format:
 	ruff check --fix .
 	black -l 120 .
 
-rebuild: clean setup 
+rebuild: clean setup-full
