@@ -10,7 +10,6 @@ dependencies = [
     "torch",
     "numpy",
     "einops==0.8.1",
-    "transformer_engine>=2.0.0",
     "packaging",
     "rich",
     "tqdm",
