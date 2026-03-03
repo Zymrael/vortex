@@ -5,7 +5,7 @@ with open("README.md") as f:
 
 setup(
     name="vtx",
-    version="1.0.7",
+    version="1.0.8",
     description="Inference and utilities for convolutional multi-hybrid models",
     long_description=readme,
     long_description_content_type="text/markdown",

@@ -1,6 +1,6 @@
 [project]
 name = "vtx"
-version = "1.0.7"
+version = "1.0.8"
 description = "Reference implementation of operators for deep signal processing architectures"
 readme = "README.md"
 authors = [{ name = "Michael Poli" }]
@@ -10,7 +10,6 @@ dependencies = [
     "torch",
     "numpy",
     "einops==0.8.1",
-    "transformer_engine>=2.0.0",
     "packaging",
     "rich",
     "tqdm",

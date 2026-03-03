@@ -115,8 +115,8 @@ def main():
     torch.cuda.manual_seed(1)
 
     args = parser.parse_args()
-    assert any(model in path for model in ['evo2-40b-1m', 'evo2-7b-1m', 'evo2-1b-8k'] 
-            for path in [args.config_path]), "Testing is only for Evo 2 40B, Evo 2 7B, and Evo 2 1B base"
+    assert any(model in path for model in ['evo2-40b-1m', 'evo2-20b-1m', 'evo2-7b-1m', 'evo2-1b-8k'] 
+            for path in [args.config_path]), "Testing is only for Evo 2 40B, 20B, 7B, and 1B base"
 
     args.num_tokens = 500
     args.temperature = 1.0

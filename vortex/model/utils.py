@@ -95,9 +95,15 @@ def load_checkpoint(model, checkpoint_path):
     # in Transformer Engine layers' _extra keys. If not, weights_only=True
     # will not be happy.
     import io
-    from transformer_engine.common.recipe import DelayedScaling, Format, _FormatHelper
 
-    torch.serialization.add_safe_globals([io.BytesIO, DelayedScaling, Format, _FormatHelper])
+    safe_globals = [io.BytesIO]
+    try:
+        from transformer_engine.common.recipe import DelayedScaling, Format, _FormatHelper
+        safe_globals.extend([DelayedScaling, Format, _FormatHelper])
+    except ImportError:
+        pass
+
+    torch.serialization.add_safe_globals(safe_globals)
 
     with torch.inference_mode():
         state = torch.load(
@@ -140,33 +146,44 @@ def move_to_device(module, device):
 
 
 def fixup_fp8_extra_states(module):
-    """Recursively fixes device location of TE's Linear fp8 extra states."""
+    """Recursively fixes device location of TE's Linear fp8 extra states.
+    No-op when Transformer Engine is not installed."""
+    if not hasattr(module, "fp8_meta"):
+        for child in module.children():
+            fixup_fp8_extra_states(child)
+        return
+
     for child in module.children():
         fixup_fp8_extra_states(child)
-    if hasattr(module, "fp8_meta"):
-        log.debug(f"Reloading fp8 extra state to a proper device for {module}")
 
-        # Must set to false, otherwise set_extra_state will be no-op
-        module.fp8_meta_tensors_initialized = False
+    log.debug(f"Reloading fp8 extra state to a proper device for {module}")
 
-        # TE Linear uses default "cuda" device to load extra state, which causes
-        # trouble when the layer is moved to another GPU. Instead, this is how
-        # TE Linear should load extra_state: using parameters' device.
-        device = next(module.parameters()).device
-        with torch.cuda.device(device):
-            module.set_extra_state(module.get_extra_state())
+    # Must set to false, otherwise set_extra_state will be no-op
+    module.fp8_meta_tensors_initialized = False
 
-        # Make sure we actually fixed everything we wanted.
-        for k in ["scaling_fwd", "scaling_bwd"]:
-            for attr in ["amax_history", "scale"]:
-                tensor = getattr(module.fp8_meta[k], attr)
-                assert tensor.device == device, (k, tensor, device)
+    # TE Linear uses default "cuda" device to load extra state, which causes
+    # trouble when the layer is moved to another GPU. Instead, this is how
+    # TE Linear should load extra_state: using parameters' device.
+    device = next(module.parameters()).device
+    with torch.cuda.device(device):
+        module.set_extra_state(module.get_extra_state())
+
+    # Make sure we actually fixed everything we wanted.
+    for k in ["scaling_fwd", "scaling_bwd"]:
+        for attr in ["amax_history", "scale"]:
+            tensor = getattr(module.fp8_meta[k], attr)
+            assert tensor.device == device, (k, tensor, device)
 
 
 def fixup_te_workspace():
     """TE uses single workspace tensor for all calls, disregarding that inputs
     may be on separate GPUs. This patches TE's Linear module to use per-device
-    workspaces."""
+    workspaces. No-op when Transformer Engine is not installed."""
+    try:
+        import transformer_engine  # noqa: F401
+    except ImportError:
+        return
+
     from functools import lru_cache
 
     @lru_cache

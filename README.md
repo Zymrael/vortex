@@ -44,6 +44,18 @@ or you can install vortex after cloning the repository:
 pip install .
 ```
 
+### Installing without Transformer Engine (Evo 2 7b only)
+
+If your environment cannot build Transformer Engine (e.g., incompatible CUDA/Python version),
+you can skip it. The Evo 2 7b models (8k, 262k, 1m context) work without TE in pure bfloat16:
+
+```bash
+pip install vtx
+```
+
+Note: Evo 2 40b, 20b, and 1b models require Transformer Engine for FP8 support and will
+not load without it.
+
 ## 2. Quick install for vortex ops
 
 ```bash

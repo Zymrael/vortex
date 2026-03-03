@@ -117,8 +117,8 @@ if __name__ == "__main__":
     torch.cuda.manual_seed(1)
 
     args = parser.parse_args()
-    assert any(model in path for model in ['evo2-40b-1m', 'evo2-7b-1m', 'evo2-1b-8k'] 
-            for path in [args.config_path]), "Testing is only for Evo 2 7B and 40B"
+    assert any(model in path for model in ['evo2-40b-1m', 'evo2-20b-1m', 'evo2-7b-1m', 'evo2-1b-8k'] 
+            for path in [args.config_path]), "Testing is only for Evo 2 40B, 20B, 7B and 1B"
 
     config = dotdict(yaml.load(open(args.config_path), Loader=yaml.FullLoader))
 
