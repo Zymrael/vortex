@@ -11,7 +11,7 @@ from .bwd import two_pass_bwd_grouped
 from .fwd import two_pass_fwd_grouped, two_pass_fwd_grouped_refactor
 
 logger = logging.getLogger(__name__)
-from hyena_ops.kernel_utils import (
+from .kernel_utils import (
     BwdKernelConfig,
     FwdKernelConfig,
 )
@@ -21,7 +21,7 @@ try:
 except ImportError:
     old_causal_conv1d_fn = None
 
-from hyena_ops.utils import toeplitz
+from .utils import toeplitz
 
 
 @dataclass(eq=False)

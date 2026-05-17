@@ -133,7 +133,7 @@ def is_power_of_2(n):
 
 
 @triton.jit
-def get_program_ids(pid, tiles_per_seq, d_tiles_per_chunk, chunks_per_seq, SWIZZLE: tl.constexpr = "row"):
+def get_program_ids(pid, tiles_per_seq, d_tiles_per_chunk, chunks_per_seq, SWIZZLE: tl.constexpr = 0):
     """
     Converts 1-D program id to 3-D grid along batch, chunk (sequence) and d (feature) dimensions.
 
@@ -142,18 +142,22 @@ def get_program_ids(pid, tiles_per_seq, d_tiles_per_chunk, chunks_per_seq, SWIZZ
         tiles_per_seq: number of tiles along sequence dimension
         d_tiles_per_chunk: number of tiles along d dimension
         chunks_per_seq: number of chunks along sequence dimension
-        SWIZZLE: "row" or "col", the threadblock launch order, where axis=0 corresponds to
+        SWIZZLE: 0/"row" or 1/"col", the threadblock launch order, where axis=0 corresponds to
         sequence dim and axis=1 to feature dimension
-            - "row" - row major tile order, where blocks are launched feature dimension then sequence dimension
-            - "col" - column major tile order, where blocks are launched sequence dimension then feature dimension
+            - 0 / "row" - row major tile order, blocks launched feature dimension then sequence dimension
+            - 1 / "col" - column major tile order, blocks launched sequence dimension then feature dimension
         NOTE: "col" should be more L2-cache friendly when grouping, since the same filter is used for each feature chunk
 
+        Triton >=3.3 rejects a Python str as a tl.constexpr *default* value
+        ("'str' object has no attribute 'type'" at the call site). The default
+        is therefore an int; the body still matches the "row"/"col" strings so
+        callers forwarding a string constexpr are unchanged.
     """
-    if SWIZZLE == "row":
+    if SWIZZLE == 0 or SWIZZLE == "row":
         pid_batch = pid // tiles_per_seq
         pid_d = pid % d_tiles_per_chunk
         pid_chunk = (pid // d_tiles_per_chunk) % chunks_per_seq
-    elif SWIZZLE == "col":
+    elif SWIZZLE == 1 or SWIZZLE == "col":
         pid_batch = pid // tiles_per_seq
         pid_chunk = pid % chunks_per_seq
         pid_d = (pid // chunks_per_seq) % d_tiles_per_chunk
