@@ -8,9 +8,9 @@ HyenaInferenceEngine.parallel_fir (the fir_length >= 128 branch). At a
 so the win is launch-count: the elementwise glue around the three cuFFT
 calls is fused into Triton kernels.
 
-It provides _hcm_complex_mul (stage 3 of fftconv_func -- the broadcast
-complex product u_f * k_f, with stage 1's 1/fft_size scale folded in) and
-_hcm_bias_residual (stage 5 -- the skip-residual add y + u * bias).
+It provides hcm_fft_conv -- a drop-in for fftconv_func -- built on two fused
+stage kernels: _hcm_complex_mul (stages 1 + 3, the scaled spectral product
+u_f * k_f) and _hcm_bias_residual (stage 5, the skip-residual add y + u*bias).
 """
 
 from typing import Callable
@@ -250,3 +250,61 @@ def _hcm_bias_residual(
         u.stride(2),
     )
     return out
+
+
+def hcm_fft_conv(
+    u: torch.Tensor,
+    k: torch.Tensor,
+    D: torch.Tensor,
+    dropout_mask: torch.Tensor | None,
+    gelu: bool = True,
+    k_rev: torch.Tensor | None = None,
+    bidirectional: bool = False,
+    print_activations: bool = False,
+    layer_idx: int | None = None,
+    **kwargs,
+) -> torch.Tensor:
+    """
+    Fused HCM FFT-convolution -- a drop-in for fftconv_func.
+
+    Reproduces fftconv_func's non-bidirectional inference path with the
+    elementwise glue fused into Triton kernels: cuFFT keeps the three
+    transforms, _hcm_complex_mul does the scaled spectral product (stages
+    1 + 3) and _hcm_bias_residual the skip-residual add (stage 5). The
+    signature matches fftconv_func so the engine dispatch is a one-line swap.
+
+    Args:
+        u (torch.Tensor): Input activations, shape (B, D, L).
+        k (torch.Tensor): Filter, shape (D, 1, K) (squeezable to (D, K)).
+        D (torch.Tensor): Per-channel skip-connection bias, shape (D,).
+        dropout_mask (torch.Tensor | None): Unused on the inference path;
+                                            kept for fftconv_func parity.
+        gelu (bool): Unused -- fftconv_func never applies it; kept for parity.
+        k_rev (torch.Tensor | None): Reverse filter; must be None -- the HCM
+                                     dispatch never sets it.
+        bidirectional (bool): Must be False -- the HCM branch is causal.
+        print_activations (bool): Accepted for parity; this path does not log.
+        layer_idx (int | None): Accepted for parity; unused.
+
+    Returns:
+        torch.Tensor: y + u * D[:, None], shape (B, D, L), u's dtype --
+                      identical in shape, dtype and value to fftconv_func.
+
+    Raises:
+        NotImplementedError: If bidirectional is True or k_rev is set; the
+                             HCM dispatch never exercises those paths.
+    """
+    if bidirectional or k_rev is not None:
+        raise NotImplementedError("hcm_fft_conv handles only the causal, non-reverse path")
+
+    seqlen = u.shape[-1]
+    fft_size = 2 * seqlen
+
+    # rfft(k) reshaped to (1, D, F) for the batch broadcast -- inlined, not
+    # adjust_filter_shape_for_broadcast, to avoid an engine import cycle.
+    k_f = torch.fft.rfft(k, n=fft_size).squeeze().unsqueeze(0)
+    u_f = torch.fft.rfft(u.to(dtype=k.dtype), n=fft_size)  # stage 2
+
+    prod = _hcm_complex_mul(u_f, k_f, fft_size)  # stages 1 + 3
+    y = torch.fft.irfft(prod, n=fft_size, norm="forward")[..., :seqlen]  # stage 4
+    return _hcm_bias_residual(y, u, D)  # stages 5 + 6
