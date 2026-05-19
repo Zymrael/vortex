@@ -11,13 +11,12 @@ from vortex.logging import activations_logger
 # vortex-kernels: optional fused Triton kernels (refs #16, #76), guarded so `import vortex` works without triton.
 try:
     from vortex.ops.hcs_interface import hcs_conv
+    from vortex.ops.hcm_interface import hcm_fft_conv
+    from vortex.ops.hcl_interface import hcl_fft_conv
 except ImportError:
     hcs_conv = None
-
-try:
-    from vortex.ops.hcm_interface import hcm_fft_conv
-except ImportError:
     hcm_fft_conv = None
+    hcl_fft_conv = None
 
 IIR_PREFILL_MODES = [
     "recurrence",
@@ -127,6 +126,7 @@ class HyenaInferenceEngine:
         hyena_flip_x1x2=False,
         use_hcs_kernel=False,
         use_hcm_kernel=False,
+        use_hcl_kernel=False,
     ) -> None:
         self.fir_fn = fir_fn
         assert iir_prefill_style in IIR_PREFILL_MODES, f"iir_prefill_style must be one of {IIR_PREFILL_MODES}"
@@ -138,6 +138,7 @@ class HyenaInferenceEngine:
         self.hyena_flip_x1x2 = hyena_flip_x1x2
         self.use_hcs_kernel = use_hcs_kernel
         self.use_hcm_kernel = use_hcm_kernel
+        self.use_hcl_kernel = use_hcl_kernel
 
     def parallel_fir(
         self,
@@ -337,7 +338,18 @@ class HyenaInferenceEngine:
 
         x1v = x1 * v
 
-        if inference_params is not None and prefill_style == "recurrence":
+        # vortex-kernels: opt-in fused Triton HCL FFT-conv (refs #16, #76).
+        # Flag off, or any prefill/flashfft/long-fir case, takes the stock path.
+        _use_hcl = (
+            self.use_hcl_kernel
+            and hcl_fft_conv is not None
+            and inference_params is None
+            and long_fir_threshold is None
+            and not (use_flashfft and L % 2 == 0)
+        )
+        if _use_hcl:
+            y = hcl_fft_conv(h, x1v, x2, D, L, fft_size)
+        elif inference_params is not None and prefill_style == "recurrence":
             y = self.prefill_via_direct_recurrence(
                 inference_params=inference_params,
                 x1v=x1v,
@@ -376,7 +388,8 @@ class HyenaInferenceEngine:
         # if self.layer_idx == 2:
         #    breakpoint()
         y = y.to(dtype=x1v.dtype)
-        y = (y + x1v * D.unsqueeze(-1)) * x2
+        if not _use_hcl:
+            y = (y + x1v * D.unsqueeze(-1)) * x2
 
         if self.print_activations:
             activations_logger.info(f"hyena filter: {h}, {h.min()}, {h.max()}")

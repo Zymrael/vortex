@@ -36,6 +36,13 @@ from tqdm import tqdm
 
 from vortex.model.attention import MHA
 
+# vortex-kernels: optional tiled HCL compute_filter (refs #16, #76), guarded so
+# `import vortex` works without triton.
+try:
+    from vortex.ops.hcl_interface import _hcl_compute_filter
+except ImportError:
+    _hcl_compute_filter = None
+
 if HAS_TE:
     from transformer_engine.common.recipe import Format, DelayedScaling
 
@@ -159,6 +166,7 @@ class HyenaCascade(nn.Module):
             hyena_flip_x1x2=config.get("hyena_flip_x1x2", False),
             use_hcs_kernel=config.get("use_hcs_kernel", False),
             use_hcm_kernel=config.get("use_hcm_kernel", False),
+            use_hcl_kernel=config.get("use_hcl_kernel", False),
         )
         self.use_flash_depthwise = config.get("use_flash_depthwise", False)
         self.data_dtype = None
@@ -396,7 +404,15 @@ class HyenaCascade(nn.Module):
             self.residues.to(filter_dtype),
             self.log_poles.to(filter_dtype),
         )
-        h = (residues[..., None] * (log_poles * self.t).exp()).sum(1)[None]  # B, D, L
+        # vortex-kernels: opt-in tiled HCL filter build -- the in-register
+        # state-size sum avoids the (D, state_size, L) intermediate that OOMs
+        # evo2_7b at L=131k. Flag off -> the stock reduction, byte-identical.
+        if self.engine.use_hcl_kernel and _hcl_compute_filter is not None:
+            h = _hcl_compute_filter(
+                residues, log_poles.squeeze(-1), self.t.reshape(-1).float()
+            )[None]
+        else:
+            h = (residues[..., None] * (log_poles * self.t).exp()).sum(1)[None]  # B, D, L
         return h, filter_dtype, log_poles, residues
 
 
