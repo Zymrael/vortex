@@ -1,17 +1,18 @@
 """
-Correctness and peak-memory tests for the HCL tiled compute_filter kernel.
+Correctness and peak-memory tests for the HCL Triton kernels.
 
 _hcl_compute_filter builds the modal filter h[d, l] = sum_s residues[d, s] *
 exp(log_poles[d, s] * t[l]) without the (D, state_size, L) intermediate that
-OOMs evo2_7b at L=131k. Correctness is checked against the explicit torch
-reduction compute_filter (model.py) runs; a peak-allocation test confirms the
-intermediate is never built.
+OOMs evo2_7b at L=131k; a peak-allocation test confirms that intermediate is
+never built. _hcl_bias_residual_gate fuses the FFT-conv epilogue
+(y + x1v * bias[:, None]) * x2. Each kernel is checked against the explicit
+torch expression parallel_iir runs.
 """
 
 import pytest
 import torch
 
-from vortex.ops.hcl_interface import _hcl_compute_filter
+from vortex.ops.hcl_interface import _hcl_bias_residual_gate, _hcl_compute_filter
 
 CUDA: bool = torch.cuda.is_available()
 
@@ -98,3 +99,46 @@ def test_hcl_compute_filter_avoids_the_intermediate() -> None:
         f"kernel peak {kernel_peak / 1e9:.2f} GB is not below half the "
         f"reference peak {ref_peak / 1e9:.2f} GB"
     )
+
+
+@pytest.mark.skipif(not CUDA, reason="HCL Triton kernel requires CUDA")
+@pytest.mark.parametrize("B", [1, 2])
+@pytest.mark.parametrize("L", [2048, 8192, 32768])
+def test_hcl_bias_residual_gate_matches_oracle(B: int, L: int) -> None:
+    """
+    The fused bias-residual-gate matches (y + x1v * bias[:, None]) * x2 at
+    evo2_7b shapes.
+    """
+    torch.manual_seed(0)
+    D = 4096
+    y = torch.randn(B, D, L, dtype=torch.float32, device="cuda")
+    x1v = torch.randn(B, D, L, dtype=torch.float32, device="cuda")
+    bias = torch.randn(D, dtype=torch.float32, device="cuda")
+    x2 = torch.randn(B, D, L, dtype=torch.float32, device="cuda")
+
+    out = _hcl_bias_residual_gate(y, x1v, bias, x2)
+    out_ref = (y + x1v * bias.unsqueeze(-1)) * x2
+
+    assert out.shape == y.shape
+    assert out.dtype == x1v.dtype
+    max_diff = (out - out_ref).abs().max().item()
+    mean_diff = (out - out_ref).abs().mean().item()
+    assert max_diff < 1e-4, f"max_diff={max_diff:.2e}"
+    assert mean_diff < 1e-5, f"mean_diff={mean_diff:.2e}"
+
+
+@pytest.mark.skipif(not CUDA, reason="HCL Triton kernel requires CUDA")
+def test_hcl_bias_residual_gate_masks_ragged_tile() -> None:
+    """
+    The kernel masks (D, L) tiles that BLOCK_D x BLOCK_L does not divide evenly.
+    """
+    torch.manual_seed(0)
+    B, D, L = 1, 100, 300
+    y = torch.randn(B, D, L, dtype=torch.float32, device="cuda")
+    x1v = torch.randn(B, D, L, dtype=torch.float32, device="cuda")
+    bias = torch.randn(D, dtype=torch.float32, device="cuda")
+    x2 = torch.randn(B, D, L, dtype=torch.float32, device="cuda")
+
+    out = _hcl_bias_residual_gate(y, x1v, bias, x2)
+    out_ref = (y + x1v * bias.unsqueeze(-1)) * x2
+    assert (out - out_ref).abs().max().item() < 1e-4
