@@ -158,6 +158,7 @@ class HyenaCascade(nn.Module):
             print_activations=self.print_activations,
             hyena_flip_x1x2=config.get("hyena_flip_x1x2", False),
             use_hcs_kernel=config.get("use_hcs_kernel", False),
+            use_hcm_kernel=config.get("use_hcm_kernel", False),
         )
         self.use_flash_depthwise = config.get("use_flash_depthwise", False)
         self.data_dtype = None

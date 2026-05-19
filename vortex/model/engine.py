@@ -8,13 +8,16 @@ import torch.nn.functional as F
 from vortex.model.utils import column_split
 from vortex.logging import activations_logger
 
-# vortex-kernels: optional fused Triton HCS kernel (refs #16, #76). hcs_interface
-# imports triton -- a Linux/GPU-only optional dependency -- so this import is
-# guarded; `import vortex` must still succeed where triton is not installed.
+# vortex-kernels: optional fused Triton kernels (refs #16, #76), guarded so `import vortex` works without triton.
 try:
     from vortex.ops.hcs_interface import hcs_conv
 except ImportError:
     hcs_conv = None
+
+try:
+    from vortex.ops.hcm_interface import hcm_fft_conv
+except ImportError:
+    hcm_fft_conv = None
 
 IIR_PREFILL_MODES = [
     "recurrence",
@@ -123,6 +126,7 @@ class HyenaInferenceEngine:
         print_activations=False,
         hyena_flip_x1x2=False,
         use_hcs_kernel=False,
+        use_hcm_kernel=False,
     ) -> None:
         self.fir_fn = fir_fn
         assert iir_prefill_style in IIR_PREFILL_MODES, f"iir_prefill_style must be one of {IIR_PREFILL_MODES}"
@@ -133,6 +137,7 @@ class HyenaInferenceEngine:
         self.print_activations = print_activations
         self.hyena_flip_x1x2 = hyena_flip_x1x2
         self.use_hcs_kernel = use_hcs_kernel
+        self.use_hcm_kernel = use_hcm_kernel
 
     def parallel_fir(
         self,
@@ -186,8 +191,15 @@ class HyenaInferenceEngine:
             z = fir_fn(u)[:, :L]  # B, L, D
 
         elif fir_length >= 128:
+            # vortex-kernels: opt-in fused Triton HCM FFT-conv (refs #16, #76).
+            # Flag off -> fftconv_func -> byte-identical to stock vortex.
+            fftconv = (
+                hcm_fft_conv
+                if self.use_hcm_kernel and hcm_fft_conv is not None
+                else fftconv_func
+            )
             with torch.autocast("cuda"):
-                z = fftconv_func(
+                z = fftconv(
                     u.to(torch.float32),
                     weight[:, :, :L].to(torch.float32),
                     bias,
