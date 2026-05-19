@@ -5,12 +5,16 @@ import gc
 import torch
 import torch.nn.functional as F
 
-try:
-    pass
-except:
-    pass
 from vortex.model.utils import column_split
 from vortex.logging import activations_logger
+
+# vortex-kernels: optional fused Triton HCS kernel (refs #16, #76). hcs_interface
+# imports triton -- a Linux/GPU-only optional dependency -- so this import is
+# guarded; `import vortex` must still succeed where triton is not installed.
+try:
+    from vortex.ops.hcs_interface import hcs_conv
+except ImportError:
+    hcs_conv = None
 
 IIR_PREFILL_MODES = [
     "recurrence",
@@ -118,6 +122,7 @@ class HyenaInferenceEngine:
         ground_truth_activations_path=None,
         print_activations=False,
         hyena_flip_x1x2=False,
+        use_hcs_kernel=False,
     ) -> None:
         self.fir_fn = fir_fn
         assert iir_prefill_style in IIR_PREFILL_MODES, f"iir_prefill_style must be one of {IIR_PREFILL_MODES}"
@@ -127,6 +132,7 @@ class HyenaInferenceEngine:
         self.ground_truth_activations_path = ground_truth_activations_path
         self.print_activations = print_activations
         self.hyena_flip_x1x2 = hyena_flip_x1x2
+        self.use_hcs_kernel = use_hcs_kernel
 
     def parallel_fir(
         self,
@@ -156,6 +162,14 @@ class HyenaInferenceEngine:
                 x2, x1, v = u.split([hidden_size, hidden_size, hidden_size], dim=1)
             if self.hyena_flip_x1x2:
                 x1, x2 = x2, x1
+
+            # vortex-kernels: opt-in fused Triton HCS short conv (refs #16, #76).
+            # Matches only the gated short-filter cascade; flag off is a no-op.
+            if self.use_hcs_kernel and hcs_conv is not None and fir_length < 128 and groups:
+                z = hcs_conv(x1, x2, v, weight, bias, gated_bias=gated_bias, padding_mask=padding_mask)
+                fir_state = (x1 * v)[..., -fir_length + 1 :] if inference_params is not None else None
+                return z, fir_state
+
             u = x1 * v
 
             if self.print_activations:
