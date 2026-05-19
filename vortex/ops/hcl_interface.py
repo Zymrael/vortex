@@ -7,9 +7,10 @@ of HyenaInferenceEngine.parallel_iir. HCL is the memory-unlock kernel: the
 stock compute_filter materialises a (D, state_size, L) fp32 intermediate that
 OOMs evo2_7b at L=131k.
 
-It provides _hcl_compute_filter -- the tiled modal-filter build that does the
-state-size reduction in-register so that intermediate never exists -- and
-_hcl_bias_residual_gate, the fused FFT-conv epilogue (y + x1v * bias) * x2.
+It provides hcl_fft_conv -- the fused FFT-conv epilogue for parallel_iir --
+built on _hcl_bias_residual_gate (the post-conv kernel) and HCM's complex
+multiply; and _hcl_compute_filter, the tiled modal-filter build the model's
+compute_filter swaps in so the (D, state_size, L) intermediate never exists.
 """
 
 from typing import Callable
@@ -17,6 +18,8 @@ from typing import Callable
 import torch
 import triton
 import triton.language as tl
+
+from vortex.ops.hcm_interface import _hcm_complex_mul
 
 # Autotuned 2-D BLOCK_D x BLOCK_L tile, shared by both kernels -- both are
 # memory-bound elementwise work over a (D, L) grid, so the winner is whichever
@@ -242,3 +245,40 @@ def _hcl_bias_residual_gate(
         x1v.stride(2),
     )
     return out
+
+
+def hcl_fft_conv(
+    h: torch.Tensor,
+    x1v: torch.Tensor,
+    x2: torch.Tensor,
+    D: torch.Tensor,
+    L: int,
+    fft_size: int,
+) -> torch.Tensor:
+    """
+    Fused HCL FFT-convolution epilogue.
+
+    Reproduces parallel_iir's long_fir_threshold-is-None branch and its
+    post-conv in one path: cuFFT keeps the three transforms, _hcm_complex_mul
+    does the scaled spectral product X*H (stage 3, with stage 1's /fft_size
+    folded in), and _hcl_bias_residual_gate does the post-conv
+    (y + x1v*D[:, None]) * x2. Returns y fully gated and residualed.
+
+    Args:
+        h (torch.Tensor): The modal filter, shape (1, D, L).
+        x1v (torch.Tensor): The conv input, shape (1, D, L).
+        x2 (torch.Tensor): The post-gate stream, shape (1, D, L).
+        D (torch.Tensor): Per-channel skip-connection bias, shape (D,).
+        L (int): Sequence length.
+        fft_size (int): The FFT length, n = 2 * L.
+
+    Returns:
+        torch.Tensor: (y + x1v*D[:, None]) * x2, shape (1, D, L), x1v's dtype.
+    """
+    H = torch.fft.rfft(h.to(dtype=torch.float32), n=fft_size)
+    X_s = torch.fft.fft(x1v.to(dtype=torch.float32), n=fft_size)
+    X = X_s[..., : H.shape[-1]]
+
+    prod = _hcm_complex_mul(X, H, fft_size)
+    y = torch.fft.irfft(prod, n=fft_size, norm="forward")[..., :L]
+    return _hcl_bias_residual_gate(y, x1v, D, x2)
