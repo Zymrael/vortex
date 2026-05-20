@@ -22,7 +22,6 @@ import torch
 
 from vortex.model.engine import HyenaInferenceEngine
 
-CUDA: bool = torch.cuda.is_available()
 _MODEL_ID: str = os.environ.get("VK_E2E_MODEL", "evo2_7b")
 _SEQ_LEN: int = 2048
 
@@ -32,7 +31,7 @@ def evo2_model():
     """
     Load the Evo2 model once for the module, or skip if unavailable.
     """
-    if not CUDA:
+    if not torch.cuda.is_available():
         pytest.skip("Evo2 e2e test requires CUDA")
     try:
         from evo2 import Evo2
@@ -76,7 +75,9 @@ def _logits(model, input_ids: torch.Tensor) -> torch.Tensor:
     return out.float()
 
 
-@pytest.mark.skipif(not CUDA, reason="Evo2 e2e test requires CUDA")
+@pytest.mark.gpu
+@pytest.mark.e2e
+@pytest.mark.slow
 def test_vk_hcl_e2e_matches_baseline(evo2_model) -> None:
     """
     A full Evo2 forward is behaviourally unchanged when use_hcl_kernel swaps
@@ -111,7 +112,9 @@ def test_vk_hcl_e2e_matches_baseline(evo2_model) -> None:
     assert cosine >= 0.9999, f"use_hcl_kernel logits diverged: cosine={cosine:.6f}"
 
 
-@pytest.mark.skipif(not CUDA, reason="Evo2 e2e test requires CUDA")
+@pytest.mark.gpu
+@pytest.mark.e2e
+@pytest.mark.slow
 def test_hcl_unlocks_131k(evo2_model) -> None:
     """
     A full evo2_7b forward at L=131072 completes with use_hcl_kernel on.

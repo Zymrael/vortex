@@ -11,8 +11,6 @@ import torch
 
 from vortex.model.engine import HyenaInferenceEngine
 
-CUDA: bool = torch.cuda.is_available()
-
 # evo2_7b HCL shapes: D=4096, state_size=16.
 B, D, S = 1, 4096, 16
 DIMS: tuple[int, int, int, int, int] = (D, 32, D // 32, 16, 256)
@@ -50,7 +48,7 @@ def _call(engine, z_pre, h, bias, L, poles, residues, t, **kw):
     )
 
 
-@pytest.mark.skipif(not CUDA, reason="HCL kernel requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("L", [2048, 8192])
 def test_vk_hcl_on_matches_baseline_fp32(L: int) -> None:
     """
@@ -68,7 +66,7 @@ def test_vk_hcl_on_matches_baseline_fp32(L: int) -> None:
     assert (y_on - y_off).abs().max().item() < 1e-2
 
 
-@pytest.mark.skipif(not CUDA, reason="HCL kernel requires CUDA")
+@pytest.mark.gpu
 def test_vk_hcl_off_by_default() -> None:
     """
     A fresh HyenaInferenceEngine has use_hcl_kernel False -- the stock path.
@@ -86,7 +84,7 @@ def test_vk_hcl_off_by_default() -> None:
     assert (y_default - y_explicit).abs().max().item() == 0.0
 
 
-@pytest.mark.skipif(not CUDA, reason="HCL kernel requires CUDA")
+@pytest.mark.gpu
 def test_vk_hcl_predicate_skips_long_fir() -> None:
     """
     The branch matches only long_fir_threshold is None -- a set threshold

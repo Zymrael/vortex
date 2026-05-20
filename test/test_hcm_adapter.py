@@ -12,8 +12,6 @@ import torch
 from vortex.model.engine import fftconv_func
 from vortex.ops.hcm_interface import hcm_fft_conv
 
-CUDA: bool = torch.cuda.is_available()
-
 
 def _hcm_inputs(B: int, L: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
@@ -27,7 +25,7 @@ def _hcm_inputs(B: int, L: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tenso
     return u, weight, bias
 
 
-@pytest.mark.skipif(not CUDA, reason="hcm_fft_conv requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("B", [1, 2])
 @pytest.mark.parametrize("L", [2048, 8192, 32768])
 def test_hcm_fft_conv_matches_fftconv_func(B: int, L: int) -> None:
@@ -48,7 +46,7 @@ def test_hcm_fft_conv_matches_fftconv_func(B: int, L: int) -> None:
     assert mean_diff < 1e-3, f"mean_diff={mean_diff:.2e}"
 
 
-@pytest.mark.skipif(not CUDA, reason="hcm_fft_conv requires CUDA")
+@pytest.mark.gpu
 def test_hcm_fft_conv_rejects_unsupported_paths() -> None:
     """
     hcm_fft_conv raises on bidirectional or reverse-filter calls -- paths the

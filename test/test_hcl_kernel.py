@@ -14,8 +14,6 @@ import torch
 
 from vortex.ops.hcl_interface import _hcl_bias_residual_gate, _hcl_compute_filter
 
-CUDA: bool = torch.cuda.is_available()
-
 
 def _modal_filter_ref(
     residues: torch.Tensor, log_poles: torch.Tensor, t: torch.Tensor
@@ -42,7 +40,7 @@ def _hcl_inputs(
     return residues, log_poles, t
 
 
-@pytest.mark.skipif(not CUDA, reason="HCL Triton kernel requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("L", [2048, 8192, 32768])
 def test_hcl_compute_filter_matches_oracle(L: int) -> None:
     """
@@ -62,7 +60,7 @@ def test_hcl_compute_filter_matches_oracle(L: int) -> None:
     assert mean_diff < 1e-4, f"mean_diff={mean_diff:.2e}"
 
 
-@pytest.mark.skipif(not CUDA, reason="HCL Triton kernel requires CUDA")
+@pytest.mark.gpu
 def test_hcl_compute_filter_masks_ragged_tile() -> None:
     """
     The kernel masks (D, L) tiles that BLOCK_D x BLOCK_L does not divide evenly.
@@ -74,7 +72,7 @@ def test_hcl_compute_filter_masks_ragged_tile() -> None:
     assert (h - h_ref).abs().max().item() < 1e-3
 
 
-@pytest.mark.skipif(not CUDA, reason="HCL Triton kernel requires CUDA")
+@pytest.mark.gpu
 def test_hcl_compute_filter_avoids_the_intermediate() -> None:
     """
     The kernel's peak allocation stays well below the reference path, which
@@ -101,7 +99,7 @@ def test_hcl_compute_filter_avoids_the_intermediate() -> None:
     )
 
 
-@pytest.mark.skipif(not CUDA, reason="HCL Triton kernel requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("B", [1, 2])
 @pytest.mark.parametrize("L", [2048, 8192, 32768])
 def test_hcl_bias_residual_gate_matches_oracle(B: int, L: int) -> None:
@@ -127,7 +125,7 @@ def test_hcl_bias_residual_gate_matches_oracle(B: int, L: int) -> None:
     assert mean_diff < 1e-5, f"mean_diff={mean_diff:.2e}"
 
 
-@pytest.mark.skipif(not CUDA, reason="HCL Triton kernel requires CUDA")
+@pytest.mark.gpu
 def test_hcl_bias_residual_gate_masks_ragged_tile() -> None:
     """
     The kernel masks (D, L) tiles that BLOCK_D x BLOCK_L does not divide evenly.

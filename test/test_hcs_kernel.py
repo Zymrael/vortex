@@ -12,8 +12,6 @@ import torch.nn.functional as F
 
 from vortex.ops.hcs_interface import hcs_depthwise_conv
 
-CUDA: bool = torch.cuda.is_available()
-
 
 def _conv1d_ref(u: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     """
@@ -26,7 +24,7 @@ def _conv1d_ref(u: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     )[..., :L]
 
 
-@pytest.mark.skipif(not CUDA, reason="HCS Triton kernel requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("L", [1024, 8192, 32768])
 @pytest.mark.parametrize("fir_length", [3, 7])
 def test_hcs_conv_matches_conv1d(L: int, fir_length: int) -> None:
@@ -47,7 +45,7 @@ def test_hcs_conv_matches_conv1d(L: int, fir_length: int) -> None:
     assert mean_diff < 1e-4, f"mean_diff={mean_diff:.2e}"
 
 
-@pytest.mark.skipif(not CUDA, reason="HCS Triton kernel requires CUDA")
+@pytest.mark.gpu
 def test_hcs_conv_is_causal() -> None:
     """
     Output position t depends only on inputs at or before t.
@@ -71,7 +69,7 @@ def test_hcs_conv_is_causal() -> None:
     assert after > 0.0, "perturbation had no effect on later positions"
 
 
-@pytest.mark.skipif(not CUDA, reason="HCS Triton kernel requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("D", [16, 4096, 4100])
 def test_hcs_conv_ragged_channels(D: int) -> None:
     """

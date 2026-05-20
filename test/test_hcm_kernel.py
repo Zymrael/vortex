@@ -14,8 +14,6 @@ import torch
 from vortex.model.engine import adjust_filter_shape_for_broadcast
 from vortex.ops.hcm_interface import _hcm_bias_residual, _hcm_complex_mul
 
-CUDA: bool = torch.cuda.is_available()
-
 
 def _spectra(
     B: int, D: int, L: int, fir_length: int
@@ -37,7 +35,7 @@ def _spectra(
     return u_f, k_f, fft_size
 
 
-@pytest.mark.skipif(not CUDA, reason="HCM Triton kernel requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("B", [1, 2])
 @pytest.mark.parametrize("L", [1024, 8192, 32768])
 def test_hcm_complex_mul_matches_oracle(B: int, L: int) -> None:
@@ -58,7 +56,7 @@ def test_hcm_complex_mul_matches_oracle(B: int, L: int) -> None:
     assert mean_diff < 1e-5, f"mean_diff={mean_diff:.2e}"
 
 
-@pytest.mark.skipif(not CUDA, reason="HCM Triton kernel requires CUDA")
+@pytest.mark.gpu
 def test_hcm_complex_mul_masks_ragged_tail() -> None:
     """
     The kernel masks the flat (D, F) tail when D*F does not divide the tile.
@@ -70,7 +68,7 @@ def test_hcm_complex_mul_masks_ragged_tail() -> None:
     assert (y_f - y_f_ref).abs().max().item() < 1e-4
 
 
-@pytest.mark.skipif(not CUDA, reason="HCM Triton kernel requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("B", [1, 2])
 @pytest.mark.parametrize("L", [1024, 8192, 32768])
 def test_hcm_bias_residual_matches_oracle(B: int, L: int) -> None:
@@ -95,7 +93,7 @@ def test_hcm_bias_residual_matches_oracle(B: int, L: int) -> None:
     assert mean_diff < 1e-5, f"mean_diff={mean_diff:.2e}"
 
 
-@pytest.mark.skipif(not CUDA, reason="HCM Triton kernel requires CUDA")
+@pytest.mark.gpu
 def test_hcm_bias_residual_masks_ragged_tile() -> None:
     """
     The kernel masks (D, L) tiles that BLOCK_D x BLOCK_L does not divide evenly.

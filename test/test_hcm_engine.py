@@ -13,8 +13,6 @@ import torch.nn.functional as F
 
 from vortex.model.engine import HyenaInferenceEngine
 
-CUDA: bool = torch.cuda.is_available()
-
 # evo2_7b HCM cascade shapes: D=4096, fir_length=128.
 B, D, K, GROUPS = 1, 4096, 128, 256
 DIMS: tuple[int, int, int, int, int] = (D, 32, D // 32, 16, GROUPS)
@@ -38,7 +36,7 @@ def _hcm_inputs(L: int, dtype: torch.dtype):
     return u, weight, bias
 
 
-@pytest.mark.skipif(not CUDA, reason="HCM kernel requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("L", [2048, 8192])
 def test_vk_hcm_on_matches_baseline_fp32(L: int) -> None:
     """
@@ -57,7 +55,7 @@ def test_vk_hcm_on_matches_baseline_fp32(L: int) -> None:
     assert (z_on - z_off).abs().max().item() < 1e-2
 
 
-@pytest.mark.skipif(not CUDA, reason="HCM kernel requires CUDA")
+@pytest.mark.gpu
 def test_vk_hcm_on_matches_baseline_bf16() -> None:
     """
     use_hcm_kernel on reproduces the stock HCM output in bf16, the inference dtype.
@@ -74,7 +72,7 @@ def test_vk_hcm_on_matches_baseline_bf16() -> None:
     torch.testing.assert_close(z_on, z_off, rtol=2e-2, atol=2e-2)
 
 
-@pytest.mark.skipif(not CUDA, reason="HCM kernel requires CUDA")
+@pytest.mark.gpu
 def test_vk_hcm_off_by_default() -> None:
     """
     A fresh HyenaInferenceEngine has use_hcm_kernel False, so parallel_fir
@@ -85,16 +83,20 @@ def test_vk_hcm_off_by_default() -> None:
     assert engine.use_hcm_kernel is False
 
     u, weight, bias = _hcm_inputs(2048, torch.float32)
-    z_default, _ = engine.parallel_fir(F.conv1d, u, weight, bias, 2048, DIMS, **_CASCADE_KW)
+    z_default, _ = engine.parallel_fir(
+        F.conv1d, u, weight, bias, 2048, DIMS, **_CASCADE_KW
+    )
 
     explicit_off = HyenaInferenceEngine(layer_idx=0, use_hcm_kernel=False)
-    z_explicit, _ = explicit_off.parallel_fir(F.conv1d, u, weight, bias, 2048, DIMS, **_CASCADE_KW)
+    z_explicit, _ = explicit_off.parallel_fir(
+        F.conv1d, u, weight, bias, 2048, DIMS, **_CASCADE_KW
+    )
 
     # both took the stock path, so they are bitwise identical
     assert (z_default - z_explicit).abs().max().item() == 0.0
 
 
-@pytest.mark.skipif(not CUDA, reason="HCM kernel requires CUDA")
+@pytest.mark.gpu
 def test_vk_hcm_predicate_skips_hcs_calls() -> None:
     """
     The branch matches only the fir_length >= 128 cascade -- an HCS-length

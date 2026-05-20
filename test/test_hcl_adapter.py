@@ -12,8 +12,6 @@ import torch
 
 from vortex.ops.hcl_interface import hcl_fft_conv
 
-CUDA: bool = torch.cuda.is_available()
-
 
 def _hcl_branch_ref(
     h: torch.Tensor,
@@ -33,7 +31,7 @@ def _hcl_branch_ref(
     return (y + x1v * D.unsqueeze(-1)) * x2
 
 
-@pytest.mark.skipif(not CUDA, reason="hcl_fft_conv requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("L", [2048, 8192, 32768])
 def test_hcl_fft_conv_matches_branch(L: int) -> None:
     """

@@ -13,8 +13,6 @@ import torch.nn.functional as F
 
 from vortex.model.engine import HyenaInferenceEngine
 
-CUDA: bool = torch.cuda.is_available()
-
 # evo2_7b HCS cascade shapes: D=4096, hcs_filter_groups=256, fir_length=7.
 B, D, K, GROUPS = 1, 4096, 7, 256
 DIMS: tuple[int, int, int, int, int] = (D, 32, D // 32, 16, GROUPS)
@@ -38,7 +36,7 @@ def _hcs_inputs(L: int, dtype: torch.dtype):
     return u, weight, bias
 
 
-@pytest.mark.skipif(not CUDA, reason="HCS kernel requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("L", [1024, 8192])
 def test_vk_hcs_on_matches_baseline_fp32(L: int) -> None:
     """
@@ -62,7 +60,7 @@ def test_vk_hcs_on_matches_baseline_fp32(L: int) -> None:
     assert (z_on - z_off).abs().max().item() < 1e-3
 
 
-@pytest.mark.skipif(not CUDA, reason="HCS kernel requires CUDA")
+@pytest.mark.gpu
 def test_vk_hcs_on_matches_baseline_bf16() -> None:
     """
     use_hcs_kernel on reproduces the stock HCS output in bf16, the inference dtype.
@@ -79,7 +77,7 @@ def test_vk_hcs_on_matches_baseline_bf16() -> None:
     torch.testing.assert_close(z_on, z_off, rtol=2e-2, atol=2e-2)
 
 
-@pytest.mark.skipif(not CUDA, reason="HCS kernel requires CUDA")
+@pytest.mark.gpu
 def test_vk_hcs_off_by_default() -> None:
     """
     A fresh HyenaInferenceEngine has use_hcs_kernel False, so parallel_fir
@@ -103,7 +101,7 @@ def test_vk_hcs_off_by_default() -> None:
     assert (z_default - z_explicit).abs().max().item() == 0.0
 
 
-@pytest.mark.skipif(not CUDA, reason="HCS kernel requires CUDA")
+@pytest.mark.gpu
 def test_vk_hcs_predicate_skips_non_hcs_calls() -> None:
     """
     The branch matches only the gated short cascade -- not the featurizer

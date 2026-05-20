@@ -13,8 +13,6 @@ import torch.nn.functional as F
 
 from vortex.ops.hcs_interface import hcs_conv
 
-CUDA: bool = torch.cuda.is_available()
-
 
 def _hcs_branch_ref(x1, x2, v, weight, bias, gated_bias, padding_mask):
     """
@@ -38,7 +36,7 @@ def _hcs_branch_ref(x1, x2, v, weight, bias, gated_bias, padding_mask):
     return x2 * z
 
 
-@pytest.mark.skipif(not CUDA, reason="hcs_conv requires CUDA")
+@pytest.mark.gpu
 @pytest.mark.parametrize("L", [1024, 8192])
 @pytest.mark.parametrize("with_bias", [True, False])
 def test_hcs_conv_matches_engine_branch(L: int, with_bias: bool) -> None:
@@ -58,7 +56,7 @@ def test_hcs_conv_matches_engine_branch(L: int, with_bias: bool) -> None:
     assert (z - z_ref).abs().max().item() < 1e-3
 
 
-@pytest.mark.skipif(not CUDA, reason="hcs_conv requires CUDA")
+@pytest.mark.gpu
 def test_hcs_conv_gated_bias() -> None:
     """
     The gated_bias=True path applies the bias multiplicatively.
@@ -76,7 +74,7 @@ def test_hcs_conv_gated_bias() -> None:
     assert (z - z_ref).abs().max().item() < 1e-3
 
 
-@pytest.mark.skipif(not CUDA, reason="hcs_conv requires CUDA")
+@pytest.mark.gpu
 def test_hcs_conv_padding_mask() -> None:
     """
     A padding_mask tensor zeros masked positions in the output.
@@ -96,7 +94,7 @@ def test_hcs_conv_padding_mask() -> None:
     assert z[..., L // 2 :].abs().max().item() == 0.0
 
 
-@pytest.mark.skipif(not CUDA, reason="hcs_conv requires CUDA")
+@pytest.mark.gpu
 def test_hcs_conv_bf16() -> None:
     """
     hcs_conv matches the engine branch in bf16, the real inference dtype.
