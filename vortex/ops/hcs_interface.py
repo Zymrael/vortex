@@ -1,4 +1,3 @@
-# pyright: reportAttributeAccessIssue=none
 """
 HCS -- Hyena Cascade Short.
 
@@ -11,26 +10,14 @@ provides the @triton.jit kernel and a thin Python launcher; the hcs_conv
 adapter that wires it behind the use_hcs_kernel config flag is added alongside.
 """
 
-from typing import Callable
-
 import torch
 import triton
 import triton.language as tl
 
-# Autotuned search space for the conv kernel's register-tile sizes. Triton
-# benchmarks these once per (D, L, FIR_LEN) and caches the winner, so no
-# single tile size is hard-coded -- the GPU and shape pick it.
-_AUTOTUNE_CONFIGS: list[triton.Config] = [
-    triton.Config({"BLOCK_D": 32, "BLOCK_L": 64}, num_warps=2),
-    triton.Config({"BLOCK_D": 64, "BLOCK_L": 64}, num_warps=4),
-    triton.Config({"BLOCK_D": 64, "BLOCK_L": 128}, num_warps=4),
-    triton.Config({"BLOCK_D": 128, "BLOCK_L": 64}, num_warps=4),
-    triton.Config({"BLOCK_D": 64, "BLOCK_L": 256}, num_warps=8),
-    triton.Config({"BLOCK_D": 128, "BLOCK_L": 128}, num_warps=8),
-]
+from vortex.ops.triton_common import BDL_TILE_CONFIGS, bdl_grid_3d
 
 
-@triton.autotune(configs=_AUTOTUNE_CONFIGS, key=["D", "L", "FIR_LEN"])
+@triton.autotune(configs=BDL_TILE_CONFIGS, key=["D", "L", "FIR_LEN"])
 @triton.jit
 def _hcs_depthwise_conv_kernel(
     u_ptr,
@@ -62,18 +49,21 @@ def _hcs_depthwise_conv_kernel(
     offs_l = pid_l * BLOCK_L + tl.arange(0, BLOCK_L)
     mask_d = offs_d < D
     mask_l = offs_l < L
+    tile_mask = mask_d[:, None] & mask_l[None, :]
 
     u_base = u_ptr + pid_b * stride_ub + offs_d[:, None] * stride_ud
     acc = tl.zeros((BLOCK_D, BLOCK_L), dtype=tl.float32)
 
+    # hcs_conv forces fp32 before launch, so loaded tiles are already fp32 --
+    # the .to(tl.float32) calls are no-ops at runtime.
     for k in tl.static_range(FIR_LEN):
         w_k = tl.load(
             w_ptr + offs_d * stride_wd + k * stride_wk, mask=mask_d, other=0.0
         )
         pos = offs_l - (FIR_LEN - 1) + k
-        mask_pos = mask_d[:, None] & (pos[None, :] >= 0) & (pos[None, :] < L)
+        mask_pos = tile_mask & (pos[None, :] >= 0) & (pos[None, :] < L)
         u_tile = tl.load(u_base + pos[None, :] * stride_ul, mask=mask_pos, other=0.0)
-        acc += w_k[:, None].to(tl.float32) * u_tile.to(tl.float32)
+        acc += w_k[:, None] * u_tile
 
     z_ptrs = (
         z_ptr
@@ -81,7 +71,7 @@ def _hcs_depthwise_conv_kernel(
         + offs_d[:, None] * stride_ud
         + offs_l[None, :] * stride_ul
     )
-    tl.store(z_ptrs, acc, mask=mask_d[:, None] & mask_l[None, :])
+    tl.store(z_ptrs, acc, mask=tile_mask)
 
 
 def hcs_depthwise_conv(u: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
@@ -112,14 +102,7 @@ def hcs_depthwise_conv(u: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
         raise ValueError(f"weight {tuple(weight.shape)} is not depthwise for D={D}")
 
     z: torch.Tensor = torch.empty_like(u)
-    # BLOCK_D / BLOCK_L are supplied by @triton.autotune; the grid is a
-    # callable so it can read the chosen tile sizes from the winning config.
-    grid: Callable[[triton.Config], tuple[int, int, int]] = lambda meta: (
-        B,
-        triton.cdiv(D, meta["BLOCK_D"]),
-        triton.cdiv(L, meta["BLOCK_L"]),
-    )
-    _hcs_depthwise_conv_kernel[grid](
+    _hcs_depthwise_conv_kernel[bdl_grid_3d(B, D, L)](
         u,
         weight,
         z,

@@ -404,12 +404,12 @@ class HyenaCascade(nn.Module):
             self.residues.to(filter_dtype),
             self.log_poles.to(filter_dtype),
         )
-        # vortex-kernels: opt-in tiled HCL filter build -- the in-register
-        # state-size sum avoids the (D, state_size, L) intermediate that OOMs
-        # evo2_7b at L=131k. Flag off -> the stock reduction, byte-identical.
+        # vortex-kernels: opt-in tiled HCL filter build avoids the
+        # (D, state_size, L) intermediate that OOMs evo2_7b at L=131k.
         if self.engine.use_hcl_kernel and _hcl_compute_filter is not None:
+            D, S = residues.shape[0], residues.shape[1]
             h = _hcl_compute_filter(
-                residues, log_poles.squeeze(-1), self.t.reshape(-1).float()
+                residues, log_poles.reshape(D, S), self.t.reshape(-1).float()
             )[None]
         else:
             h = (residues[..., None] * (log_poles * self.t).exp()).sum(1)[None]  # B, D, L

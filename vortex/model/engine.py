@@ -8,7 +8,8 @@ import torch.nn.functional as F
 from vortex.model.utils import column_split
 from vortex.logging import activations_logger
 
-# vortex-kernels: optional fused Triton kernels (refs #16, #76), guarded so `import vortex` works without triton.
+# Optional fused Triton kernels (refs #16, #76). Guarded so `import vortex`
+# still works on hosts without triton.
 try:
     from vortex.ops.hcs_interface import hcs_conv
     from vortex.ops.hcm_interface import hcm_fft_conv
@@ -169,8 +170,7 @@ class HyenaInferenceEngine:
             if self.hyena_flip_x1x2:
                 x1, x2 = x2, x1
 
-            # vortex-kernels: opt-in fused Triton HCS short conv (refs #16, #76).
-            # Matches only the gated short-filter cascade; flag off is a no-op.
+            # Opt-in HCS kernel for the gated short-filter cascade (refs #16, #76).
             if self.use_hcs_kernel and hcs_conv is not None and fir_length < 128 and groups:
                 z = hcs_conv(x1, x2, v, weight, bias, gated_bias=gated_bias, padding_mask=padding_mask)
                 fir_state = (x1 * v)[..., -fir_length + 1 :] if inference_params is not None else None
@@ -192,8 +192,7 @@ class HyenaInferenceEngine:
             z = fir_fn(u)[:, :L]  # B, L, D
 
         elif fir_length >= 128:
-            # vortex-kernels: opt-in fused Triton HCM FFT-conv (refs #16, #76).
-            # Flag off -> fftconv_func -> byte-identical to stock vortex.
+            # Opt-in HCM FFT-conv (refs #16, #76); flag off falls back to fftconv_func.
             fftconv = (
                 hcm_fft_conv
                 if self.use_hcm_kernel and hcm_fft_conv is not None
@@ -338,8 +337,8 @@ class HyenaInferenceEngine:
 
         x1v = x1 * v
 
-        # vortex-kernels: opt-in fused Triton HCL FFT-conv (refs #16, #76).
-        # Flag off, or any prefill/flashfft/long-fir case, takes the stock path.
+        # Opt-in HCL FFT-conv (refs #16, #76). Skipped during prefill, when
+        # flashfft owns even-L, or when long_fir_threshold pins the depthwise path.
         _use_hcl = (
             self.use_hcl_kernel
             and hcl_fft_conv is not None
@@ -388,6 +387,7 @@ class HyenaInferenceEngine:
         # if self.layer_idx == 2:
         #    breakpoint()
         y = y.to(dtype=x1v.dtype)
+        # hcl_fft_conv already applied the post-conv (y + x1v*D[:, None]) * x2.
         if not _use_hcl:
             y = (y + x1v * D.unsqueeze(-1)) * x2
 

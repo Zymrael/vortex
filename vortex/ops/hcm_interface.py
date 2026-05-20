@@ -1,4 +1,3 @@
-# pyright: reportAttributeAccessIssue=none
 """
 HCM -- Hyena Cascade Medium.
 
@@ -13,29 +12,21 @@ stage kernels: _hcm_complex_mul (stages 1 + 3, the scaled spectral product
 u_f * k_f) and _hcm_bias_residual (stage 5, the skip-residual add y + u*bias).
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import triton
 import triton.language as tl
 
-# Autotuned search spaces -- both kernels are memory-bound elementwise work,
-# so the winning tile is whichever best saturates bandwidth at a given shape.
-# Triton benchmarks each set once per shape key and caches the winner.
+from vortex.ops.triton_common import BDL_TILE_CONFIGS, bdl_grid_3d
+
+# 1-D BLOCK sweep for the complex multiply -- the only HC kernel that flattens
+# (D, F) to a single axis, so it can't share BDL_TILE_CONFIGS.
 _COMPLEX_MUL_CONFIGS: list[triton.Config] = [
     triton.Config({"BLOCK": 256}, num_warps=2),
     triton.Config({"BLOCK": 512}, num_warps=4),
     triton.Config({"BLOCK": 1024}, num_warps=4),
     triton.Config({"BLOCK": 2048}, num_warps=8),
-]
-
-_BIAS_RESIDUAL_CONFIGS: list[triton.Config] = [
-    triton.Config({"BLOCK_D": 32, "BLOCK_L": 64}, num_warps=2),
-    triton.Config({"BLOCK_D": 64, "BLOCK_L": 64}, num_warps=4),
-    triton.Config({"BLOCK_D": 64, "BLOCK_L": 128}, num_warps=4),
-    triton.Config({"BLOCK_D": 128, "BLOCK_L": 64}, num_warps=4),
-    triton.Config({"BLOCK_D": 64, "BLOCK_L": 256}, num_warps=8),
-    triton.Config({"BLOCK_D": 128, "BLOCK_L": 128}, num_warps=8),
 ]
 
 
@@ -132,9 +123,7 @@ def _hcm_complex_mul(
     y_r = torch.view_as_real(y_f)
 
     DF = D * F
-    # BLOCK is supplied by @triton.autotune; the grid is a callable so it can
-    # read the chosen tile size from the winning config.
-    grid: Callable[[triton.Config], tuple[int, int]] = lambda meta: (
+    grid: Callable[[dict], tuple[int, int]] = lambda meta: (
         triton.cdiv(DF, meta["BLOCK"]),
         B,
     )
@@ -149,7 +138,7 @@ def _hcm_complex_mul(
     return y_f
 
 
-@triton.autotune(configs=_BIAS_RESIDUAL_CONFIGS, key=["D", "L"])
+@triton.autotune(configs=BDL_TILE_CONFIGS, key=["D", "L"])
 @triton.jit
 def _hcm_bias_residual_kernel(
     y_ptr,
@@ -230,15 +219,7 @@ def _hcm_bias_residual(
     u = u.contiguous()
     bias = bias.contiguous()
     out: torch.Tensor = torch.empty_like(u)
-
-    # BLOCK_D / BLOCK_L are supplied by @triton.autotune; the grid is a
-    # callable so it can read the chosen tile sizes from the winning config.
-    grid: Callable[[triton.Config], tuple[int, int, int]] = lambda meta: (
-        B,
-        triton.cdiv(D, meta["BLOCK_D"]),
-        triton.cdiv(L, meta["BLOCK_L"]),
-    )
-    _hcm_bias_residual_kernel[grid](
+    _hcm_bias_residual_kernel[bdl_grid_3d(B, D, L)](
         y,
         u,
         bias,
@@ -268,43 +249,40 @@ def hcm_fft_conv(
     Fused HCM FFT-convolution -- a drop-in for fftconv_func.
 
     Reproduces fftconv_func's non-bidirectional inference path with the
-    elementwise glue fused into Triton kernels: cuFFT keeps the three
-    transforms, _hcm_complex_mul does the scaled spectral product (stages
-    1 + 3) and _hcm_bias_residual the skip-residual add (stage 5). The
-    signature matches fftconv_func so the engine dispatch is a one-line swap.
+    elementwise glue fused into Triton kernels. cuFFT keeps the three
+    transforms; _hcm_complex_mul does the scaled spectral product and
+    _hcm_bias_residual does the skip-residual add. The signature mirrors
+    fftconv_func so the engine dispatch is a one-line swap; the trailing
+    args (dropout_mask, gelu, k_rev, bidirectional, print_activations,
+    layer_idx, **kwargs) exist only for that parity.
 
     Args:
         u (torch.Tensor): Input activations, shape (B, D, L).
-        k (torch.Tensor): Filter, shape (D, 1, K) (squeezable to (D, K)).
+        k (torch.Tensor): Filter, shape (D, 1, K).
         D (torch.Tensor): Per-channel skip-connection bias, shape (D,).
-        dropout_mask (torch.Tensor | None): Unused on the inference path;
-                                            kept for fftconv_func parity.
-        gelu (bool): Unused -- fftconv_func never applies it; kept for parity.
-        k_rev (torch.Tensor | None): Reverse filter; must be None -- the HCM
-                                     dispatch never sets it.
-        bidirectional (bool): Must be False -- the HCM branch is causal.
-        print_activations (bool): Accepted for parity; this path does not log.
-        layer_idx (int | None): Accepted for parity; unused.
 
     Returns:
-        torch.Tensor: y + u * D[:, None], shape (B, D, L), u's dtype --
-                      identical in shape, dtype and value to fftconv_func.
+        torch.Tensor: y + u * D[:, None], shape (B, D, L), u's dtype.
 
     Raises:
-        NotImplementedError: If bidirectional is True or k_rev is set; the
-                             HCM dispatch never exercises those paths.
+        NotImplementedError: If bidirectional is True or k_rev is set;
+                             unsupported paths the HCM dispatch never hits.
     """
     if bidirectional or k_rev is not None:
-        raise NotImplementedError("hcm_fft_conv handles only the causal, non-reverse path")
+        raise NotImplementedError(
+            "hcm_fft_conv handles only the causal, non-reverse path"
+        )
 
     seqlen = u.shape[-1]
     fft_size = 2 * seqlen
 
-    # rfft(k) reshaped to (1, D, F) for the batch broadcast -- inlined, not
-    # adjust_filter_shape_for_broadcast, to avoid an engine import cycle.
-    k_f = torch.fft.rfft(k, n=fft_size).squeeze().unsqueeze(0)
-    u_f = torch.fft.rfft(u.to(dtype=k.dtype), n=fft_size)  # stage 2
+    # rfft(k) reshaped to (1, D, F) for the batch broadcast -- inlined to avoid
+    # the adjust_filter_shape_for_broadcast import cycle. squeeze(1) drops only
+    # the channel-group axis; .squeeze() with no arg would also collapse a D=1
+    # case and break the (1, D, F) broadcast contract.
+    k_f = torch.fft.rfft(k, n=fft_size).squeeze(1).unsqueeze(0)
+    u_f = torch.fft.rfft(u.to(dtype=k.dtype), n=fft_size)
 
-    prod = _hcm_complex_mul(u_f, k_f, fft_size)  # stages 1 + 3
-    y = torch.fft.irfft(prod, n=fft_size, norm="forward")[..., :seqlen]  # stage 4
-    return _hcm_bias_residual(y, u, D)  # stages 5 + 6
+    prod = _hcm_complex_mul(u_f, k_f, fft_size)
+    y = torch.fft.irfft(prod, n=fft_size, norm="forward")[..., :seqlen]
+    return _hcm_bias_residual(y, u, D)

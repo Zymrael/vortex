@@ -1,4 +1,3 @@
-# pyright: reportAttributeAccessIssue=none
 """
 HCL -- Hyena Cascade Long.
 
@@ -13,28 +12,15 @@ multiply; and _hcl_compute_filter, the tiled modal-filter build the model's
 compute_filter swaps in so the (D, state_size, L) intermediate never exists.
 """
 
-from typing import Callable
-
 import torch
 import triton
 import triton.language as tl
 
 from vortex.ops.hcm_interface import _hcm_complex_mul
-
-# Autotuned 2-D BLOCK_D x BLOCK_L tile, shared by both kernels -- both are
-# memory-bound elementwise work over a (D, L) grid, so the winner is whichever
-# tile best saturates bandwidth, benchmarked once per (D, L) and cached.
-_TILE_CONFIGS: list[triton.Config] = [
-    triton.Config({"BLOCK_D": 32, "BLOCK_L": 64}, num_warps=2),
-    triton.Config({"BLOCK_D": 64, "BLOCK_L": 64}, num_warps=4),
-    triton.Config({"BLOCK_D": 64, "BLOCK_L": 128}, num_warps=4),
-    triton.Config({"BLOCK_D": 128, "BLOCK_L": 64}, num_warps=4),
-    triton.Config({"BLOCK_D": 64, "BLOCK_L": 256}, num_warps=8),
-    triton.Config({"BLOCK_D": 128, "BLOCK_L": 128}, num_warps=8),
-]
+from vortex.ops.triton_common import BDL_TILE_CONFIGS, bdl_grid_2d, bdl_grid_3d
 
 
-@triton.autotune(configs=_TILE_CONFIGS, key=["D", "L"])
+@triton.autotune(configs=BDL_TILE_CONFIGS, key=["D", "L"])
 @triton.jit
 def _hcl_compute_filter_kernel(
     residues_ptr,
@@ -43,6 +29,10 @@ def _hcl_compute_filter_kernel(
     h_ptr,
     D,
     L,
+    stride_rs_d,
+    stride_rs_s,
+    stride_h_d,
+    stride_h_l,
     S: tl.constexpr,
     BLOCK_D: tl.constexpr,
     BLOCK_L: tl.constexpr,
@@ -50,10 +40,9 @@ def _hcl_compute_filter_kernel(
     """
     Modal filter: h[d, l] = sum_s residues[d, s] * exp(log_poles[d, s] * t[l]).
 
-    One program covers a (BLOCK_D, BLOCK_L) tile of h. The state-size sum (S
-    terms) runs in the fp32 register accumulator, so the (D, S, L) intermediate
-    that OOMs the stock compute_filter at L=131k never exists. residues and
-    log_poles are (D, S) row-major; t is (L,); h is (D, L) row-major.
+    One program covers a (BLOCK_D, BLOCK_L) tile of h; the state-size sum (S
+    terms) runs in a fp32 register accumulator so the (D, S, L) intermediate
+    that OOMs the stock compute_filter at L=131k never exists.
     """
     pid_d = tl.program_id(0)
     pid_l = tl.program_id(1)
@@ -67,15 +56,12 @@ def _hcl_compute_filter_kernel(
 
     acc = tl.zeros((BLOCK_D, BLOCK_L), dtype=tl.float32)
     for s in tl.static_range(S):
-        r_s = tl.load(residues_ptr + offs_d * S + s, mask=mask_d, other=0.0).to(
-            tl.float32
-        )
-        lp_s = tl.load(log_poles_ptr + offs_d * S + s, mask=mask_d, other=0.0).to(
-            tl.float32
-        )
+        rs_offs = offs_d * stride_rs_d + s * stride_rs_s
+        r_s = tl.load(residues_ptr + rs_offs, mask=mask_d, other=0.0).to(tl.float32)
+        lp_s = tl.load(log_poles_ptr + rs_offs, mask=mask_d, other=0.0).to(tl.float32)
         acc += r_s[:, None] * tl.exp(lp_s[:, None] * t_tile[None, :])
 
-    h_ptrs = h_ptr + offs_d[:, None] * L + offs_l[None, :]
+    h_ptrs = h_ptr + offs_d[:, None] * stride_h_d + offs_l[None, :] * stride_h_l
     tl.store(h_ptrs, acc, mask=mask_d[:, None] & mask_l[None, :])
 
 
@@ -123,17 +109,23 @@ def _hcl_compute_filter(
     t = t.contiguous().float()
     h: torch.Tensor = torch.empty(D, L, dtype=torch.float32, device=residues.device)
 
-    # BLOCK_D / BLOCK_L are supplied by @triton.autotune; the grid is a
-    # callable so it can read the chosen tile sizes from the winning config.
-    grid: Callable[[triton.Config], tuple[int, int]] = lambda meta: (
-        triton.cdiv(D, meta["BLOCK_D"]),
-        triton.cdiv(L, meta["BLOCK_L"]),
+    _hcl_compute_filter_kernel[bdl_grid_2d(D, L)](
+        residues,
+        log_poles,
+        t,
+        h,
+        D,
+        L,
+        residues.stride(0),
+        residues.stride(1),
+        h.stride(0),
+        h.stride(1),
+        S,
     )
-    _hcl_compute_filter_kernel[grid](residues, log_poles, t, h, D, L, S)
     return h
 
 
-@triton.autotune(configs=_TILE_CONFIGS, key=["D", "L"])
+@triton.autotune(configs=BDL_TILE_CONFIGS, key=["D", "L"])
 @triton.jit
 def _hcl_bias_residual_gate_kernel(
     y_ptr,
@@ -224,15 +216,7 @@ def _hcl_bias_residual_gate(
     x2 = x2.contiguous()
     bias = bias.contiguous()
     out: torch.Tensor = torch.empty_like(x1v)
-
-    # BLOCK_D / BLOCK_L are supplied by @triton.autotune; the grid is a
-    # callable so it can read the chosen tile sizes from the winning config.
-    grid: Callable[[triton.Config], tuple[int, int, int]] = lambda meta: (
-        B,
-        triton.cdiv(D, meta["BLOCK_D"]),
-        triton.cdiv(L, meta["BLOCK_L"]),
-    )
-    _hcl_bias_residual_gate_kernel[grid](
+    _hcl_bias_residual_gate_kernel[bdl_grid_3d(B, D, L)](
         y,
         x1v,
         bias,
@@ -258,11 +242,14 @@ def hcl_fft_conv(
     """
     Fused HCL FFT-convolution epilogue.
 
-    Reproduces parallel_iir's long_fir_threshold-is-None branch and its
-    post-conv in one path: cuFFT keeps the three transforms, _hcm_complex_mul
-    does the scaled spectral product X*H (stage 3, with stage 1's /fft_size
-    folded in), and _hcl_bias_residual_gate does the post-conv
-    (y + x1v*D[:, None]) * x2. Returns y fully gated and residualed.
+    Reproduces parallel_iir's long_fir_threshold-is-None branch in one path:
+    cuFFT keeps the three transforms, _hcm_complex_mul does the spectral
+    product X*H scaled by 1/fft_size, and _hcl_bias_residual_gate does the
+    post-conv (y + x1v*D[:, None]) * x2.
+
+    The signal FFT uses rfft -- mathematically identical to fft on a real
+    input but produces only fft_size//2 + 1 bins, so cuFFT does ~half the
+    work the stock parallel_iir's `fft` + slice path does.
 
     Args:
         h (torch.Tensor): The modal filter, shape (1, D, L).
@@ -276,8 +263,7 @@ def hcl_fft_conv(
         torch.Tensor: (y + x1v*D[:, None]) * x2, shape (1, D, L), x1v's dtype.
     """
     H = torch.fft.rfft(h.to(dtype=torch.float32), n=fft_size)
-    X_s = torch.fft.fft(x1v.to(dtype=torch.float32), n=fft_size)
-    X = X_s[..., : H.shape[-1]]
+    X = torch.fft.rfft(x1v.to(dtype=torch.float32), n=fft_size)
 
     prod = _hcm_complex_mul(X, H, fft_size)
     y = torch.fft.irfft(prod, n=fft_size, norm="forward")[..., :L]
