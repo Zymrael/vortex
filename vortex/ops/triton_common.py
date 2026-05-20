@@ -1,11 +1,10 @@
 """
 Shared autotune configs and grid helpers for the HC{S,M,L} Triton kernels.
 
-Pieces here are kept intentionally small. Only put a config or helper here
-when it is genuinely identical across kernels -- any kernel that needs a
-different tile or grid declares its own. Each @triton.autotune-decorated
-kernel keeps its own benchmark cache, so sharing the config list is a
-syntactic convenience, not a performance contract.
+BDL_TILE_CONFIGS is the (BLOCK_D, BLOCK_L) sweep for memory-bound elementwise
+kernels over a (D, L) plane. Each @triton.autotune-decorated kernel keeps
+its own benchmark cache, so sharing the config list is a syntactic
+convenience, not a performance contract.
 """
 
 from collections.abc import Callable

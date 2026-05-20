@@ -1,13 +1,11 @@
 """
 HCS -- Hyena Cascade Short.
 
-A from-scratch Triton depthwise causal 1D convolution for the short-filter
-(fir_length < 128) gated branch of HyenaInferenceEngine.parallel_fir.
-
-The convolution is the only time-mixing op in an HCS layer: a depthwise
-filter of fir_length taps (7 in evo2_7b) applied per channel. This module
-provides the @triton.jit kernel and a thin Python launcher; the hcs_conv
-adapter that wires it behind the use_hcs_kernel config flag is added alongside.
+Triton depthwise causal 1D conv for the short-filter (fir_length < 128)
+gated branch of HyenaInferenceEngine.parallel_fir. A depthwise filter of
+fir_length taps (7 in evo2_7b) applied per channel; the only time-mixing
+op in an HCS layer. Exposes the @triton.jit kernel and the hcs_conv
+adapter wired behind use_hcs_kernel.
 """
 
 import torch
@@ -89,10 +87,8 @@ def hcs_depthwise_conv(u: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     Returns:
         torch.Tensor: Convolved output, shape (B, D, L), same dtype as u.
     """
-    if not u.is_contiguous():
-        u = u.contiguous()
-    if not weight.is_contiguous():
-        weight = weight.contiguous()
+    u = u.contiguous()
+    weight = weight.contiguous()
     if u.dim() != 3 or weight.dim() != 3:
         raise ValueError(f"expected 3-D u and weight, got {u.shape} and {weight.shape}")
 
@@ -131,11 +127,9 @@ def hcs_conv(
     """
     Fully-gated HCS short conv: z = x2 * (conv(x1 * v, weight) + bias).
 
-    Drop-in replacement for the gated fir_length < 128 branch of
-    HyenaInferenceEngine.parallel_fir. It reproduces that branch exactly:
-    the depthwise conv runs in fp32 for numerical parity with the F.conv1d
-    path, the result is cast back to the activation dtype, bias-added,
-    masked, then closed with the post-gate multiply by x2.
+    Drop-in for the gated fir_length < 128 branch of
+    HyenaInferenceEngine.parallel_fir. Conv runs in fp32 for parity with
+    F.conv1d, then casts back to x1.dtype.
 
     Args:
         x1 (torch.Tensor): Pre-gate "key" stream, shape (B, D, L).
@@ -143,10 +137,10 @@ def hcs_conv(
         v (torch.Tensor): "Value" stream, shape (B, D, L).
         weight (torch.Tensor): Depthwise filter, shape (D, 1, fir_length).
         bias (torch.Tensor | None): Per-channel skip-gain, shape (D,).
-        gated_bias (bool): If True the bias is applied multiplicatively
-                           (bias * x1 * v); HCS uses additive bias (False).
-        padding_mask (torch.Tensor | None): If a tensor, zeros masked
-                                            positions after the conv, shape (B, L).
+        gated_bias (bool): If True, bias is applied multiplicatively
+                           (bias * x1 * v); HCS uses additive (False).
+        padding_mask (torch.Tensor | None): If set, zeros masked positions
+                                            after the conv, shape (B, L).
 
     Returns:
         torch.Tensor: Gated HCS output, shape (B, D, L), x1's dtype.

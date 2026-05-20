@@ -246,15 +246,12 @@ def hcm_fft_conv(
     **kwargs,
 ) -> torch.Tensor:
     """
-    Fused HCM FFT-convolution -- a drop-in for fftconv_func.
+    Fused HCM FFT-convolution -- drop-in for fftconv_func.
 
-    Reproduces fftconv_func's non-bidirectional inference path with the
-    elementwise glue fused into Triton kernels. cuFFT keeps the three
-    transforms; _hcm_complex_mul does the scaled spectral product and
-    _hcm_bias_residual does the skip-residual add. The signature mirrors
-    fftconv_func so the engine dispatch is a one-line swap; the trailing
-    args (dropout_mask, gelu, k_rev, bidirectional, print_activations,
-    layer_idx, **kwargs) exist only for that parity.
+    cuFFT keeps the three transforms; _hcm_complex_mul does stage 3 (scaled
+    spectral product), _hcm_bias_residual does stage 5 (skip-residual add).
+    Trailing kwargs exist only for signature parity with fftconv_func so the
+    engine dispatch is a one-line swap.
 
     Args:
         u (torch.Tensor): Input activations, shape (B, D, L).
@@ -265,8 +262,7 @@ def hcm_fft_conv(
         torch.Tensor: y + u * D[:, None], shape (B, D, L), u's dtype.
 
     Raises:
-        NotImplementedError: If bidirectional is True or k_rev is set;
-                             unsupported paths the HCM dispatch never hits.
+        NotImplementedError: If bidirectional is True or k_rev is set.
     """
     if bidirectional or k_rev is not None:
         raise NotImplementedError(

@@ -242,14 +242,10 @@ def hcl_fft_conv(
     """
     Fused HCL FFT-convolution epilogue.
 
-    Reproduces parallel_iir's long_fir_threshold-is-None branch in one path:
-    cuFFT keeps the three transforms, _hcm_complex_mul does the spectral
-    product X*H scaled by 1/fft_size, and _hcl_bias_residual_gate does the
-    post-conv (y + x1v*D[:, None]) * x2.
-
-    The signal FFT uses rfft -- mathematically identical to fft on a real
-    input but produces only fft_size//2 + 1 bins, so cuFFT does ~half the
-    work the stock parallel_iir's `fft` + slice path does.
+    Reproduces parallel_iir's long_fir_threshold-is-None branch. cuFFT keeps
+    the three transforms; _hcm_complex_mul does the spectral product X*H
+    scaled by 1/fft_size; _hcl_bias_residual_gate does the post-conv
+    (y + x1v*D[:, None]) * x2. Uses rfft (half the bins of fft on real input).
 
     Args:
         h (torch.Tensor): The modal filter, shape (1, D, L).
