@@ -238,7 +238,7 @@ def hcm_fft_conv(
     k: torch.Tensor,
     D: torch.Tensor,
     dropout_mask: torch.Tensor | None,
-    gelu: bool = True,
+    gelu: bool = False,
     k_rev: torch.Tensor | None = None,
     bidirectional: bool = False,
     print_activations: bool = False,
@@ -251,22 +251,33 @@ def hcm_fft_conv(
     cuFFT keeps the three transforms; _hcm_complex_mul does stage 3 (scaled
     spectral product), _hcm_bias_residual does stage 5 (skip-residual add).
     Trailing kwargs exist only for signature parity with fftconv_func so the
-    engine dispatch is a one-line swap.
+    engine dispatch is a one-line swap. gelu and dropout_mask are part of that
+    parity surface but unsupported -- the kernel has no activation or dropout
+    stage, so a set value raises instead of being silently dropped.
 
     Args:
         u (torch.Tensor): Input activations, shape (B, D, L).
         k (torch.Tensor): Filter, shape (D, 1, K).
         D (torch.Tensor): Per-channel skip-connection bias, shape (D,).
+        dropout_mask (torch.Tensor | None): Unsupported; must be None (parity only).
+        gelu (bool): Unsupported; must be False; the kernel has no activation stage.
 
     Returns:
         torch.Tensor: y + u * D[:, None], shape (B, D, L), u's dtype.
 
     Raises:
-        NotImplementedError: If bidirectional is True or k_rev is set.
+        NotImplementedError: If bidirectional is True, k_rev is set, gelu is
+                             True, or dropout_mask is not None -- the HCM
+                             kernel implements none of these.
     """
     if bidirectional or k_rev is not None:
         raise NotImplementedError(
             "hcm_fft_conv handles only the causal, non-reverse path"
+        )
+    if gelu or dropout_mask is not None:
+        raise NotImplementedError(
+            "hcm_fft_conv implements only the gelu=False, dropout_mask=None "
+            "path used by evo2; the kernel has no activation or dropout stage."
         )
 
     seqlen = u.shape[-1]

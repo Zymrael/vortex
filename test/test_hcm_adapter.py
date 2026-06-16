@@ -49,11 +49,15 @@ def test_hcm_fft_conv_matches_fftconv_func(B: int, L: int) -> None:
 @pytest.mark.gpu
 def test_hcm_fft_conv_rejects_unsupported_paths() -> None:
     """
-    hcm_fft_conv raises on bidirectional or reverse-filter calls -- paths the
-    HCM dispatch never exercises.
+    hcm_fft_conv raises on bidirectional, reverse-filter, gelu, or dropout-mask
+    calls -- paths the HCM kernel does not implement.
     """
     u, weight, bias = _hcm_inputs(1, 2048)
     with pytest.raises(NotImplementedError):
         hcm_fft_conv(u, weight, bias, None, bidirectional=True)
     with pytest.raises(NotImplementedError):
         hcm_fft_conv(u, weight, bias, None, k_rev=weight)
+    with pytest.raises(NotImplementedError):
+        hcm_fft_conv(u, weight, bias, None, gelu=True)
+    with pytest.raises(NotImplementedError):
+        hcm_fft_conv(u, weight, bias, torch.ones_like(u))
