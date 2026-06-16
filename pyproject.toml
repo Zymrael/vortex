@@ -7,18 +7,27 @@ authors = [{ name = "Michael Poli" }]
 requires-python = ">=3.10"
 license-files = ["LICENSE"]
 dependencies = [
-    "torch",
-    "numpy",
-    "einops==0.8.1",
-    "packaging",
-    "rich",
-    "tqdm",
-    "PyYAML",
+  "torch",
+  "numpy",
+  "einops==0.8.1",
+  "packaging",
+  "rich",
+  "tqdm",
+  "PyYAML",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["vortex*"]
+
+[tool.pytest.ini_options]
+testpaths = ["test"]
+markers = [
+  "gpu: requires a CUDA device",
+  "e2e: end-to-end test that loads an Evo2 checkpoint (slow, large GPU memory)",
+  "slow: takes >10s",
+]
+filterwarnings = ["ignore::DeprecationWarning:torch\\..*"]
 
 [tool.black]
 line-length = 119

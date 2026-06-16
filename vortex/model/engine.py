@@ -1,16 +1,24 @@
 # Copyright (c) 2024, Michael Poli.
 
 import gc
+import warnings
 
 import torch
 import torch.nn.functional as F
 
-try:
-    pass
-except:
-    pass
 from vortex.model.utils import column_split
 from vortex.logging import activations_logger
+
+# Optional fused Triton kernels (refs #16, #76). Guarded so `import vortex`
+# still works on hosts without triton.
+try:
+    from vortex.ops.hcs_interface import hcs_conv
+    from vortex.ops.hcm_interface import hcm_fft_conv
+    from vortex.ops.hcl_interface import hcl_fft_conv
+except ImportError:
+    hcs_conv = None
+    hcm_fft_conv = None
+    hcl_fft_conv = None
 
 IIR_PREFILL_MODES = [
     "recurrence",
@@ -118,6 +126,9 @@ class HyenaInferenceEngine:
         ground_truth_activations_path=None,
         print_activations=False,
         hyena_flip_x1x2=False,
+        use_hcs_kernel=False,
+        use_hcm_kernel=False,
+        use_hcl_kernel=False,
     ) -> None:
         self.fir_fn = fir_fn
         assert iir_prefill_style in IIR_PREFILL_MODES, f"iir_prefill_style must be one of {IIR_PREFILL_MODES}"
@@ -127,6 +138,26 @@ class HyenaInferenceEngine:
         self.ground_truth_activations_path = ground_truth_activations_path
         self.print_activations = print_activations
         self.hyena_flip_x1x2 = hyena_flip_x1x2
+        self.use_hcs_kernel = use_hcs_kernel
+        self.use_hcm_kernel = use_hcm_kernel
+        self.use_hcl_kernel = use_hcl_kernel
+
+        # A flag set with its kernel symbol None means the optional triton
+        # import failed; warn rather than silently fall back to the dense
+        # path. warnings dedupes by message, so this fires once per flag
+        # despite per-layer engine construction.
+        for flag_name, requested, kernel in (
+            ("use_hcs_kernel", use_hcs_kernel, hcs_conv),
+            ("use_hcm_kernel", use_hcm_kernel, hcm_fft_conv),
+            ("use_hcl_kernel", use_hcl_kernel, hcl_fft_conv),
+        ):
+            if requested and kernel is None:
+                warnings.warn(
+                    f"{flag_name}=True but its Triton kernel failed to import; "
+                    "falling back to the dense reference path with no speedup.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
     def parallel_fir(
         self,
@@ -156,6 +187,13 @@ class HyenaInferenceEngine:
                 x2, x1, v = u.split([hidden_size, hidden_size, hidden_size], dim=1)
             if self.hyena_flip_x1x2:
                 x1, x2 = x2, x1
+
+            # Opt-in HCS kernel for the gated short-filter cascade (refs #16, #76).
+            if self.use_hcs_kernel and hcs_conv is not None and fir_length < 128 and groups:
+                z = hcs_conv(x1, x2, v, weight, bias, gated_bias=gated_bias, padding_mask=padding_mask)
+                fir_state = (x1 * v)[..., -fir_length + 1 :] if inference_params is not None else None
+                return z, fir_state
+
             u = x1 * v
 
             if self.print_activations:
@@ -172,8 +210,14 @@ class HyenaInferenceEngine:
             z = fir_fn(u)[:, :L]  # B, L, D
 
         elif fir_length >= 128:
+            # Opt-in HCM FFT-conv (refs #16, #76); flag off falls back to fftconv_func.
+            fftconv = (
+                hcm_fft_conv
+                if self.use_hcm_kernel and hcm_fft_conv is not None
+                else fftconv_func
+            )
             with torch.autocast("cuda"):
-                z = fftconv_func(
+                z = fftconv(
                     u.to(torch.float32),
                     weight[:, :, :L].to(torch.float32),
                     bias,
@@ -311,7 +355,18 @@ class HyenaInferenceEngine:
 
         x1v = x1 * v
 
-        if inference_params is not None and prefill_style == "recurrence":
+        # Opt-in HCL FFT-conv (refs #16, #76). Skipped during prefill, when
+        # flashfft owns even-L, or when long_fir_threshold pins the depthwise path.
+        _use_hcl = (
+            self.use_hcl_kernel
+            and hcl_fft_conv is not None
+            and inference_params is None
+            and long_fir_threshold is None
+            and not (use_flashfft and L % 2 == 0)
+        )
+        if _use_hcl:
+            y = hcl_fft_conv(h, x1v, x2, D, L, fft_size)
+        elif inference_params is not None and prefill_style == "recurrence":
             y = self.prefill_via_direct_recurrence(
                 inference_params=inference_params,
                 x1v=x1v,
@@ -350,7 +405,9 @@ class HyenaInferenceEngine:
         # if self.layer_idx == 2:
         #    breakpoint()
         y = y.to(dtype=x1v.dtype)
-        y = (y + x1v * D.unsqueeze(-1)) * x2
+        # hcl_fft_conv already applied the post-conv (y + x1v*D[:, None]) * x2.
+        if not _use_hcl:
+            y = (y + x1v * D.unsqueeze(-1)) * x2
 
         if self.print_activations:
             activations_logger.info(f"hyena filter: {h}, {h.min()}, {h.max()}")

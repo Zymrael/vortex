@@ -36,6 +36,13 @@ from tqdm import tqdm
 
 from vortex.model.attention import MHA
 
+# vortex-kernels: optional tiled HCL compute_filter (refs #16, #76), guarded so
+# `import vortex` works without triton.
+try:
+    from vortex.ops.hcl_interface import _hcl_compute_filter
+except ImportError:
+    _hcl_compute_filter = None
+
 if HAS_TE:
     from transformer_engine.common.recipe import Format, DelayedScaling
 
@@ -157,6 +164,9 @@ class HyenaCascade(nn.Module):
             ground_truth_activations_path=self.ground_truth_activations_path,
             print_activations=self.print_activations,
             hyena_flip_x1x2=config.get("hyena_flip_x1x2", False),
+            use_hcs_kernel=config.get("use_hcs_kernel", False),
+            use_hcm_kernel=config.get("use_hcm_kernel", False),
+            use_hcl_kernel=config.get("use_hcl_kernel", False),
         )
         self.use_flash_depthwise = config.get("use_flash_depthwise", False)
         self.data_dtype = None
@@ -394,7 +404,15 @@ class HyenaCascade(nn.Module):
             self.residues.to(filter_dtype),
             self.log_poles.to(filter_dtype),
         )
-        h = (residues[..., None] * (log_poles * self.t).exp()).sum(1)[None]  # B, D, L
+        # vortex-kernels: opt-in tiled HCL filter build avoids the
+        # (D, state_size, L) intermediate that OOMs evo2_7b at L=131k.
+        if self.engine.use_hcl_kernel and _hcl_compute_filter is not None:
+            D, S = residues.shape[0], residues.shape[1]
+            h = _hcl_compute_filter(
+                residues, log_poles.reshape(D, S), self.t.reshape(-1).float()
+            )[None]
+        else:
+            h = (residues[..., None] * (log_poles * self.t).exp()).sum(1)[None]  # B, D, L
         return h, filter_dtype, log_poles, residues
 
 
@@ -625,6 +643,20 @@ class StripedHyena(nn.Module):
 
         self.ground_truth_activations_path = config.get("ground_truth_activations_path", None)
         self.logger.info(f"Initializing StripedHyena with config: {config}")
+
+        # Fused HC* kernels measurably regress generation quality on the 1B
+        # checkpoint; 7B/40B are unaffected. OR the two identifiers so the 1B
+        # is still caught if one drifts; 1920 is the 1B hidden width.
+        kernel_flags: tuple[str, ...] = ("use_hcs_kernel", "use_hcm_kernel", "use_hcl_kernel")
+        is_1b: bool = (
+            "evo2-1b" in (config.get("model_name") or "")
+            or config.get("hidden_size") == 1920
+        )
+        if is_1b and any(config.get(flag, False) for flag in kernel_flags):
+            self.logger.warning(
+                "Fused HC* kernels regress generation quality on the 1B checkpoint; "
+                "disable use_hc*_kernel on 1B if generation quality matters."
+            )
 
         with torch.device("cuda:0" if torch.cuda.is_available() else "cpu"):
             self.embedding_layer = VocabParallelEmbedding(config)

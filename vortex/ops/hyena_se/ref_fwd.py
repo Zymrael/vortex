@@ -21,7 +21,7 @@ except ImportError:
 
 from einops import rearrange
 
-from hyena_ops.utils import correction_toeplitz, toeplitz
+from .utils import correction_toeplitz, toeplitz
 
 
 def gcg_fwd_ref_original(x, B, C, h, use_causal_conv=False):

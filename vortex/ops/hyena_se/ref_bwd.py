@@ -1,5 +1,5 @@
 import torch
-from hyena_ops.utils import correction_toeplitz, toeplitz
+from .utils import correction_toeplitz, toeplitz
 
 
 def dh_local(dT_local, g, hl, chunk_size):
