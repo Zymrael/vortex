@@ -644,6 +644,20 @@ class StripedHyena(nn.Module):
         self.ground_truth_activations_path = config.get("ground_truth_activations_path", None)
         self.logger.info(f"Initializing StripedHyena with config: {config}")
 
+        # Fused HC* kernels measurably regress generation quality on the 1B
+        # checkpoint; 7B/40B are unaffected. OR the two identifiers so the 1B
+        # is still caught if one drifts; 1920 is the 1B hidden width.
+        kernel_flags: tuple[str, ...] = ("use_hcs_kernel", "use_hcm_kernel", "use_hcl_kernel")
+        is_1b: bool = (
+            "evo2-1b" in (config.get("model_name") or "")
+            or config.get("hidden_size") == 1920
+        )
+        if is_1b and any(config.get(flag, False) for flag in kernel_flags):
+            self.logger.warning(
+                "Fused HC* kernels regress generation quality on the 1B checkpoint; "
+                "disable use_hc*_kernel on 1B if generation quality matters."
+            )
+
         with torch.device("cuda:0" if torch.cuda.is_available() else "cpu"):
             self.embedding_layer = VocabParallelEmbedding(config)
 
