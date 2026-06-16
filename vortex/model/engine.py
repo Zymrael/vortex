@@ -1,6 +1,7 @@
 # Copyright (c) 2024, Michael Poli.
 
 import gc
+import warnings
 
 import torch
 import torch.nn.functional as F
@@ -140,6 +141,23 @@ class HyenaInferenceEngine:
         self.use_hcs_kernel = use_hcs_kernel
         self.use_hcm_kernel = use_hcm_kernel
         self.use_hcl_kernel = use_hcl_kernel
+
+        # A flag set with its kernel symbol None means the optional triton
+        # import failed; warn rather than silently fall back to the dense
+        # path. warnings dedupes by message, so this fires once per flag
+        # despite per-layer engine construction.
+        for flag_name, requested, kernel in (
+            ("use_hcs_kernel", use_hcs_kernel, hcs_conv),
+            ("use_hcm_kernel", use_hcm_kernel, hcm_fft_conv),
+            ("use_hcl_kernel", use_hcl_kernel, hcl_fft_conv),
+        ):
+            if requested and kernel is None:
+                warnings.warn(
+                    f"{flag_name}=True but its Triton kernel failed to import; "
+                    "falling back to the dense reference path with no speedup.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
 
     def parallel_fir(
         self,
