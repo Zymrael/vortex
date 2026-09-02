@@ -329,6 +329,16 @@ class HyenaCascade(nn.Module):
         if self.data_dtype is None:
             self.data_dtype = u.dtype
 
+        if len(u.shape) > 2 and u.shape[1] > 1:
+            raise ValueError(
+                "HyenaCascade.sequential_forward received a multi-token input "
+                f"(seqlen={u.shape[1]}) after prefill, but chunk forward with "
+                "initial state is not implemented. Previously this input was "
+                "silently truncated to its last token (`u = u[:, -1]`), "
+                f"discarding {u.shape[1] - 1} token(s), returning a wrong "
+                "output for the surviving position, and corrupting the "
+                "recurrent/conv state for all subsequent tokens."
+            )
         if len(u.shape) > 2:
             u = u[:, -1]
 
